@@ -298,7 +298,10 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
   **and** `resources/x.pl` (both clauses).
 - `.jip`, `lib/` and `target/` are gitignored — never commit build output.
 - `PrettyPrinter` output is not a reliable view of term structure; use
-  `write_canonical/1` or `=../2` when debugging the parser.
+  `write_canonical/1` or `=../2` when debugging the parser. This is not just a
+  debugging habit — the printer never brackets by operator priority, so
+  `writeq(f(a,(b,c),d))` prints `f(a,b,c,d)` and reads back as `f/4`, and
+  `*(a,+(b,c))` and `+(*(a,b),c)` print identically. See `CODE_REVIEW.md` §17.
 - Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
   past it with `evaluation_error(int_overflow)`. That is the limit of the
   `double` the value is held in, so it is a real boundary, not an arbitrary

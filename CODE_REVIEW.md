@@ -44,8 +44,10 @@ accumulated infrastructure debt.
 a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
 §9, §10, §15, §16 and the two resolved bullets of §12 are fixed; §3 is fixed
 apart from the built-in table. 80 tests and a 441-case conformance suite, none
-disabled. What remains is §11 (error handling and resource management) and §13
-(maintainability), plus the deeper items §10 lists as still open.
+disabled. What remains is §11 (error handling and resource management), §13
+(maintainability), §17 (the printer never brackets by operator priority, so
+`writeq/1` is not re-readable) and §18, plus the deeper items §10 lists as still
+open.
 
 ---
 
@@ -983,6 +985,97 @@ which of the two a given write belongs to. §10 describes the same engine copyin
 clauses eagerly on every resolution step, which is the expensive half of the
 same design decision; this is the cheap half, and it is the one that was wrong.
 Any future change that touches `m_callList` should be read with this in mind.
+
+---
+
+## 17. High — `write/1` and `writeq/1` never bracket by operator priority
+
+**Open.** Found while reading a failure report from the conformance runner,
+which uses `writeq/1` to echo the goal: the echo said `findall/4` for a term
+that was `findall/3`. The parse was fine; the printer was lying.
+
+ISO 7.10.5 writes every operand at a bounded priority — an argument of a
+compound term and an element of a list at 999, an operand of an operator at
+that operator's priority adjusted for associativity — and brackets any subterm
+whose principal functor is an operator above that bound. `PrettyPrinter` does
+none of this. It has no notion of a priority bound at all: `printParams` calls
+`print` on each argument, and `printOperator` calls `print` on each operand.
+
+The result is that `writeq/1` is not re-readable, which is the one property it
+exists to have, and that `write/1` maps distinct terms onto identical text:
+
+```prolog
+?- X = f(a, (b,c), d), writeq(X).      % X is f/3
+f(a,b,c,d)                             % reads back as f/4
+
+?- writeq(f(a, (b;c), d)).             % f/3
+f(a,b ; c,d)                           % reads back as f/2
+
+?- write(*(a, +(b,c))).
+a * b + c
+?- write(+(*(a,b), c)).
+a * b + c                              % two different terms, same text
+```
+
+`write_canonical/1` is correct — it emits functional notation and sidesteps the
+question — which is why the conformance suite is unaffected and why CLAUDE.md
+already tells you to debug the parser with `write_canonical/1` rather than
+`write/1`. That note is a workaround for this defect; this is the defect.
+
+What it costs in practice: `listing/1` output for any clause whose body contains
+a nested conjunction (`findall(X, (a,b), L)` — very common) cannot be consulted
+back. Error and trace messages misrepresent the terms they quote. Any embedder
+round-tripping terms through text loses structure silently.
+
+The fix is the standard algorithm and it is well understood — thread a maximum
+priority through `print`, bracket when the subterm's principal operator exceeds
+it, and adjust the bound per argument position (`xfy`: left P-1, right P;
+`yfx`: left P, right P-1; `xfx`: both P-1; `fy`: P; `fx`: P-1). It is perhaps
+eighty lines. It is not done here because it changes the output of `write/1`,
+`print/1`, `listing/1` and every error message in the system, and that blast
+radius is the author's call rather than a reviewer's.
+
+Note that conjunctions are represented as bare `ConsCell`s, not as `','/2`
+`Functor`s, so the implementation has to treat that case explicitly — as
+`printCons` already does for list elements, which is why `[(a,b),c]` prints
+correctly today and `f((a,b),c)` does not.
+
+---
+
+## 18. Low — a syntax error in the parser can surface as `ClassCastException`
+
+**Open.** Seven places in `PrologParser.translateTerm` cast the top of the term
+stack to `Operator` without checking:
+
+```java
+Operator lastOp = (Operator)termStack.peek();     // lines 717 and 760
+Operator lastOp = (Operator) termStack.pop();     // 506, 560, 596, 642, 1179
+```
+
+On malformed input the stack top can be a term instead. A missing closing
+parenthesis followed by a line beginning with a prefix operator is enough:
+
+```prolog
+:- r((catch(a, b, c)).
+:- write(x).
+```
+
+```
+java.lang.ClassCastException: class com.ugos.jiprolog.engine.BuiltInPredicate
+  cannot be cast to class com.ugos.jiprolog.engine.Operator
+	at com.ugos.jiprolog.engine.PrologParser.translateTerm(PrologParser.java:760)
+```
+
+Most malformed input does produce a proper `JIPSyntaxErrorException`
+(`unexpected_eof`, `operator_expected`, `not_assoc_operator`), so this is a gap
+rather than the rule. But an embedder catching `JIPSyntaxErrorException` around
+`consultFile` will not catch this one, and the message names a Java class rather
+than a line number.
+
+Left open because the honest fix is a guard at each of the seven sites, and
+`PrologParser` is the file §13 flags as least maintainable — worth doing as part
+of a deliberate pass over it rather than by wrapping the boundary in a
+`catch(ClassCastException)`, which would also swallow genuine internal bugs.
 
 ---
 
