@@ -57,6 +57,9 @@ public class IsoConformanceTest extends PrologTestBase
         "/iso/cases_arith.pl",
         "/iso/cases_db.pl",
         "/iso/cases_atoms.pl",
+        "/iso/cases_unify.pl",
+        "/iso/cases_backtracking.pl",
+        "/iso/cases_cut.pl",
     };
 
     @Test
@@ -100,7 +103,7 @@ public class IsoConformanceTest extends PrologTestBase
         System.out.println("ISO conformance: " + passed + " passed, " + failed
                 + " failed, " + (passed + failed) + " cases");
 
-        assertTrue(passed + failed >= 250,
+        assertTrue(passed + failed >= 340,
                 "the suite shrank to " + (passed + failed) + " cases; was something dropped?");
         assertEquals(0, failed,
                 () -> "ISO conformance failures:\n" + report.toString());

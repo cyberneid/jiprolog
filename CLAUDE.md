@@ -97,7 +97,10 @@ if you care to keep it accurate.
   shared-static work; every one of its tests fails against the pre-fix sources.
 - `DcgTest`, `ListenerApiTest`, `ReflectionHandleTest` — the areas fixed in
   `CODE_REVIEW.md` §2, §4/§12 and §5.
-- `IsoConformanceTest` — runs the 262-case suite in `test/resources/iso/`.
+- `ResolutionTest` — unification, backtracking and cut, including whole
+  programs checked against independently known answers (six queens has four
+  solutions, `tak(14,10,4)` is 5). The slowest class in the suite at ~13 s.
+- `IsoConformanceTest` — runs the 348-case suite in `test/resources/iso/`.
 
 Tests run against the **release** kernel (no `JIPDebugger.debug`), so the suite
 also proves the bootstrap produced a loadable kernel. Surefire uses
@@ -126,6 +129,13 @@ iso('9.1.3', (X is 7 // 2, X == 3), success).
 
 To add cases, drop them in the matching `cases_*.pl` (each needs
 `:- multifile(iso/3).`) or add a file and list it in `IsoConformanceTest.SUITE`.
+
+`cases_unify.pl`, `cases_backtracking.pl` and `cases_cut.pl` carry the engine
+core. Much of what they check is the **undo** path — that a goal which binds
+and then fails leaves nothing bound — because that is what breaks silently:
+the goal fails either way, just with stale bindings left behind. If you touch
+`WAM.backtrack`, `VariableTrail` or anything in `_unify`, these are the files
+that will notice.
 
 The suite is expected to be entirely green. A case that starts failing is
 either a regression or a real deviation — the latter belongs in

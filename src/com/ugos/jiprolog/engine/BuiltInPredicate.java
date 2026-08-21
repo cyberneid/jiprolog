@@ -84,7 +84,19 @@ final class BuiltInPredicate extends Functor
             final Hashtable<Variable, Variable> vars = new Hashtable<Variable, Variable>(10);
 
             if(!m_builtIn.unify(getParams(), vars))
+            {
+                // Un built-in puo' legare qualcosa e poi fallire: integer_bounds/2
+                // unifica due argomenti in and, quindi con integer_bounds(X, 999)
+                // il primo lega X e il secondo fallisce. Quei legami non sono nel
+                // trail di chi ha iniziato l'unificazione - stanno solo qui - e
+                // vanno disfatti sul posto, altrimenti X resta legato dopo un
+                // goal fallito.
+                final Enumeration<Variable> bound = vars.keys();
+                while(bound.hasMoreElements())
+                    bound.nextElement().clear();
+
                 return false;
+            }
 
             final Enumeration<Variable> en = vars.keys();
             while(en.hasMoreElements())
