@@ -39,8 +39,7 @@ accumulated infrastructure debt.
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
 a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
 §9, §10 and the two resolved bullets of §12 are fixed; §3 is fixed apart from
-the built-in table. 68 tests and a 262-case ISO conformance suite, none
-disabled. What remains is §11 (error handling and resource management) and §13
+the built-in table. 80 tests and a 348-case conformance suite, none disabled. What remains is §11 (error handling and resource management) and §13
 (maintainability), plus the deeper items §10 lists as still open.
 
 ---
@@ -655,6 +654,16 @@ Recorded so the next person does not repeat them:
   measure better on the benchmark it targets and removes a per-attempt
   allocation, but it is not the win the original diagnosis expected.
 
+  It also introduced a regression, and where that was caught is the point.
+  `BuiltInPredicate._unify` returned false without undoing what the built-in
+  had already bound. Most built-ins end in a single `unify` call, which cleans
+  up after itself on failure, so nothing showed — but `integer_bounds/2`
+  unifies both arguments with `&&`, so `integer_bounds(X, 999)` binds `X`,
+  fails on the second argument, and left `X` bound after a failed goal. The 68
+  tests in place when the change was made did not notice: they had two cut
+  cases, four trivial disjunction cases, ten basic unification cases, and
+  nothing at all on the undo path. See §15.
+
 ### What is left
 
 The nrev profile is now the structure-copying cost this section should have
@@ -824,6 +833,44 @@ It has earned its keep even so. Two defects fell out of writing it:
 Nothing, other than keeping the suite growing. Sections not yet covered:
 8.11–8.14 (stream and term I/O), 8.17 (implementation-defined hooks), and the
 flags in 7.11.
+
+---
+
+## 15. The engine core had almost no coverage
+
+Recorded because it is the process failure behind the one regression this work
+introduced, not a defect in the code.
+
+The performance work in §10 changed `WAM.backtrack` and rewrote the unification
+trail. The tests it was made against were, for those three areas:
+
+- **cut** — two cases: `(! ; true)` and `(call((!, fail)) ; true)`
+- **backtracking** — four disjunction cases, none checking solution order or
+  count, none checking that bindings are restored
+- **unification** — ten cases, all of the shape `1 = 1` or `f(X,b) = f(a,Y)`,
+  and **none** exercising the undo path
+
+That last gap is the one that mattered. A unification that binds and then fails
+must leave its operands untouched, and when it does not, nothing looks wrong:
+the goal fails either way, just with stale bindings left behind. It is the kind
+of defect that surfaces three refactors later as an inexplicable wrong answer.
+
+**Fixed** by 86 new cases — `cases_unify.pl`, `cases_backtracking.pl`,
+`cases_cut.pl` — and `ResolutionTest`. The suite cases check properties one at a
+time, with solution order and count asserted through `findall` inside the goal
+so a case states which solutions it expects. `ResolutionTest` checks whole
+programs against answers that are published facts rather than something this
+engine decided: six queens has four solutions, five queens has ten, naive
+reverse of 1..20 is 20..1, `tak(14,10,4)` is 5.
+
+Worth noting for calibration: three cases in the first draft were wrong, and the
+engine was right. The cut is transparent to `;/2`, so `(!, fail ; true)` fails —
+it removes the alternative, then fails — and `call((c(X), !))` yields one
+solution, because the cut is opaque to the *caller* but still commits inside the
+call. A suite written against an implementation by the same hand gets the
+implementation's benefit of the doubt; these three went the other way, which is
+at least a sign the cases were derived from the standard rather than from
+observed behaviour.
 
 ---
 
