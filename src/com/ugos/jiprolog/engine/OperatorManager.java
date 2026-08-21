@@ -74,8 +74,12 @@ final class OperatorManager
         put(600, "xfy", ":");
         put(500, "yfx", "+");
         put(500, "yfx", "-");
-        put(500, "fx", "-");
-        put(500, "fx", "+");
+        // ISO 6.3.4.4: il meno e il piu' prefissi sono 200 fy, non 500 fx.
+        // A 500 il prefisso inghiotte gli operatori a 400: "- a mod b" veniva
+        // letto come -(mod(a,b)) invece di mod(-(a),b). Ed fx, essendo non
+        // associativo, faceva fallire "- - 1" con not_assoc_operator(-).
+        put(200, "fy", "-");
+        put(200, "fy", "+");
         put(400, "yfx", "*");
         put(400, "yfx", "/");
         put(400, "yfx", "//");

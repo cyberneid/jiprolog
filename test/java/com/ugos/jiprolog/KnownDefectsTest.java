@@ -51,49 +51,21 @@ public class KnownDefectsTest extends PrologTestBase
     // ---------------------------------------------------------------- section 1
 
     @Test
-    @Disabled("CODE_REVIEW.md section 1a - PrologParser drops the prefix operator")
-    @DisplayName("a negative literal followed by an infix operator keeps its sign")
-    public void negativeLiteralBeforeInfixOperator()
-    {
-        // parses as +(7,1), so this currently evaluates to 8
-        assertEquals("-6", valueOf("X is -7 + 1", "X"));
-        // parses as -(7,1), so this currently evaluates to 6
-        assertEquals("-8", valueOf("X is -7 - 1", "X"));
-        assertEquals("+(-7,1)", canonical("-7 + 1"));
-    }
-
-    @Test
-    @Disabled("CODE_REVIEW.md section 1b - PrologParser deletes the operand")
-    @DisplayName("a prefix operator inside an argument list keeps its operand")
-    public void prefixOperatorInsideArgumentList()
-    {
-        // currently -(+(1)): the 7 is discarded outright
-        assertEquals("f(+(-7,1))", canonical("f(-7 + 1)"));
-        // currently -(+(1)): the atom a is discarded outright
-        assertEquals("f(+(-(a),1))", canonical("f(-a + 1)"));
-    }
-
-    @Test
-    @Disabled("CODE_REVIEW.md section 1c - prefix minus binds too loosely")
-    @DisplayName("a negative literal binds tighter than a priority 400 operator")
-    public void negativeLiteralBindsTighterThanMod()
-    {
-        // parses as -(mod(7,2)), so this currently evaluates to -1
-        assertEquals("1", valueOf("X is -7 mod 2", "X"));
-        assertEquals("mod(-7,2)", canonical("-7 mod 2"));
-        // parses as -(**(2,2)), so this currently evaluates to -4.
-        // Asserted on the parse rather than the value, so that this test turns
-        // green on the parser fix alone and does not also wait on **/2 (below).
-        assertEquals("**(-2,2)", canonical("-2 ** 2"));
-    }
-
-    @Test
-    @Disabled("CODE_REVIEW.md section 1 - '- 7' with layout is a compound, not a literal")
-    @DisplayName("a minus separated by layout is the compound -(7)")
+    @Disabled("CODE_REVIEW.md section 1 - the negative-literal fold ignores layout")
+    @DisplayName("a minus separated by layout is the compound -(7), not the literal -7")
     public void minusWithLayoutIsCompound()
     {
+        // PrologParser.resolveOperator folds a prefix -/+ over a number into a
+        // negative literal whatever came between them, so "- 7" is read as the
+        // integer -7. ISO 6.3.1.2 forms the negative constant only when the sign
+        // is followed *directly* by the numeral.
         assertFalse(succeeds("integer(- 7)"));
         assertEquals("-(7)", canonical("- 7"));
+        assertEquals("f(-(1))", canonical("f(- 1)"));
+
+        // and, the other way round, an adjacent sign must beat the operator:
+        // "-2 ** 2" is **(-2,2), not -(**(2,2)).
+        assertEquals("**(-2,2)", canonical("-2 ** 2"));
     }
 
     // ---------------------------------------------------------------- section 9

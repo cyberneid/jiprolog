@@ -19,9 +19,10 @@ behave correctly under test).
 
 The problems are concentrated in three places:
 
-1. **The parser silently corrupts terms containing a prefix operator followed by
-   an infix operator.** `X is -7 + 1` evaluates to `8`. This is a wrong-answer
-   bug with no diagnostic, and it is the most important thing in this document.
+1. ~~**The parser silently corrupts terms containing a prefix operator followed
+   by an infix operator.** `X is -7 + 1` evaluates to `8`.~~ **Fixed:** the
+   cause was the operator table, not the parser — prefix `-` was declared
+   `500 fx` instead of ISO's `200 fy`. One layout-sensitive case remains.
 2. **Shared mutable static state** makes multiple `JIPEngine` instances
    non-isolated and the library not thread-safe — including DCG translation,
    which runs against a statically pinned engine using static scratch terms.
@@ -33,14 +34,19 @@ layer and the API boundary are sound. The findings are localized defects and
 accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
-a working jar, and runs its tests on four JDK/OS combinations. §4, §5 and the
-two resolved bullets of §12 are fixed, each with tests. §1, §2, §3 and the rest
-are open; `KnownDefectsTest` carries a disabled, already-written test for each
+a working jar, and runs its tests on four JDK/OS combinations. §1 is fixed
+except for one layout-sensitive case; §4, §5 and the two resolved bullets of
+§12 are fixed. Each has tests. §2, §3 and the rest are open;
+`KnownDefectsTest` carries a disabled, already-written test for each remaining
 defect that can be expressed at the Prolog level.
 
 ---
 
 ## 1. Critical — prefix-operator parsing silently corrupts terms
+
+> **Mostly fixed**, and the diagnosis below was wrong about where the bug was.
+> See "Root cause, corrected" at the end of this section. One layout-sensitive
+> case remains open.
 
 **`src/com/ugos/jiprolog/engine/PrologParser.java:1022-1027`**
 
@@ -56,89 +62,80 @@ if(op.isPrefix())//prefix
 Negative numeric literals are not recognized by the tokenizer. Instead, `-`/`+`
 are parsed as ordinary prefix operators and folded into a number *after the fact*
 in `resolveOperator`, by string-concatenating the operator name onto
-`obj1.toString()` and re-parsing it. The fold only fires when the operand has
-already been reduced to a bare `Expression`, which depends on what follows.
+`obj1.toString()` and re-parsing it.
 
-The result is two different, context-dependent corruptions. Both are silent —
-no syntax error, no warning.
+The observed symptoms were, all silent — no syntax error, no warning:
 
-### 1a. In a body or at top level, the prefix operator is dropped
+| source | parsed as | should be |
+|---|---|---|
+| `X is -7 + 1` | `+(7,1)` → **8** | `+(-7,1)` → -6 |
+| `X is -7 - 1` | `-(7,1)` → **6** | `-(-7,1)` → -8 |
+| `f(-7 + 1)` | `f(-(+(1)))` — the `7` deleted | `f(+(-7,1))` |
+| `f(-a + 1)` | `f(-(+(1)))` — the `a` deleted | `f(+(-(a),1))` |
+| `X is -7 mod 2` | `-(mod(7,2))` → -1 | `mod(-7,2)` → 1 |
+| `X is - a mod b` | `-(mod(a,b))` | `mod(-(a),b)` |
+| `- - 1` | **syntax error** `not_assoc_operator(-)` | `-(-(1))` |
 
-```prolog
-X = -7 + 1,  X =.. L.      % L = [+, 7, 1]        expected [+, -7, 1]
-Y is -7 + 1.               % Y = 8                expected -6
-Z is -7 - 1.               % Z = 6                expected -8
+### Root cause, corrected
+
+The original diagnosis above blamed `PrologParser.resolveOperator` and
+recommended moving negative-literal recognition into `PrologTokenizer`. That
+was wrong. The parser was working from a bad operator table:
+
+**`src/com/ugos/jiprolog/engine/OperatorManager.java:77-78`**
+
+```java
+put(500, "fx", "-");
+put(500, "fx", "+");
 ```
 
-Verified:
+ISO 6.3.4.4 puts prefix `-` at **200 fy**. Two consequences, and they account
+for every row of the table above:
 
-```
-univ([+,7,1])
-v(8)
-univ([-,7,1])
-v(6)
-```
+- At priority 500 the prefix operator outranks everything at 400 (`mod`, `rem`,
+  `*`, `/`, `<<`, `>>`), so it swallowed them whole: `- a mod b` became
+  `-(mod(a,b))`. The operand-deletion cases were the same mispriced reduction
+  reaching the "both operators are prefix" branch of `resolveOperator`, where
+  the already-consumed operand is not on the stack.
+- `fx` is non-associative, so a prefix operator could not take another prefix
+  operator of the same priority as its operand, and `- - 1` was rejected
+  outright.
 
-`X is -7 + 1` yielding `8` is arithmetic returning the wrong number for input a
-first-year textbook would use.
+**Fixed** by declaring them `200 fy`. That one change fixes every row above and
+changes nothing else: a 62-term parser corpus covering precedence,
+associativity, lists, curly terms, control constructs and numeric literal
+syntax is byte-identical before and after, and the kernel plus all thirteen
+libraries still bootstrap. `ParserTest` now covers the corpus.
 
-### 1b. Inside an argument list, the *operand* is deleted
+The lesson for the next person: the parser is hard to read and was the obvious
+suspect, but the defect was in a data table thirty lines long. Check the
+operator priorities against the ISO table before reading `PrologParser`.
 
-```prolog
-show(T) :- T =.. L, write(L), nl.
+### Still open: the negative-literal fold ignores layout
 
-show(-7 + 1).      % [-, +(1)]     the integer 7 is gone
-show(-a + 1).      % [-, +(1)]     the atom a is gone
-show(f(-7 + 1)).   % [f, - + 1]    same, nested
-```
+The fold at `PrologParser.java:1024` is still there, and still applies whether
+or not layout separates the sign from the numeral. ISO 6.3.1.2 forms the
+negative constant only when the sign is followed *directly* by the numeral:
 
-Verified:
+| source | parsed as | should be |
+|---|---|---|
+| `- 7` | `-7`, and `integer(- 7)` succeeds | `-(7)`, `integer(- 7)` fails |
+| `f(- 1)` | `f(-1)` | `f(-(1))` |
+| `-2 ** 2` | `-(**(2,2))` → -4 | `**(-2,2)` → 4.0 |
 
-```
-univ([-,+ 1])
-univ([-,+ 1])
-univ([f,- + 1])
-```
+The last row is the one with teeth: an adjacent sign has to beat a
+priority-200 operator, and today it does not.
 
-A subterm the user wrote is discarded outright and parsing continues.
+The machinery for the correct fix is already in the tree but disabled on both
+sides — `PrologParser.sign` (field at line 51, set only in commented-out code
+at line 321) and `PrologTokenizer.TOKEN_SIGN`/`STATE_SIGN`. Since the tokenizer
+emits `TOKEN_WHITESPACE` as a real token, "the next token is a number" already
+means "no layout intervened", so a one-token lookahead in the parser's atom
+case is enough: in operand position, peek; if the next token is a number, set
+`sign` and let the existing `TOKEN_NUMBER` case apply it; otherwise push the
+token back and treat `-` as the operator it is. Then delete the fold.
 
-### 1c. Prefix `-` binds too loosely against higher-priority infix operators
-
-```prolog
-X is -7 mod 2.     % -1     expected 1   (parses as -(mod(7,2)))
-Y is -2 ** 2.      % -4     expected 4.0 (parses as -(**(2,2)))
-```
-
-ISO 6.3.1.2 requires `-` immediately followed by a numeric token to denote the
-negative constant, so `-7 mod 2` is `mod(-7, 2)` = 1.
-
-### Also wrong in the same area
-
-- `- 7` (with a space) is folded to the integer `-7`; ISO requires the compound
-  `-(7)`. `integer(- 7)` succeeds here and must not.
-- `+1` is folded to `1`, discarding the `+(1)` structure: `X = 7 * +1` gives
-  `*(7,1)`.
-- The fold round-trips through `PrettyPrinter` (`obj1.toString()`) and
-  `Double.valueOf` — slow, and it loses the float/integer distinction for
-  exponent-only literals, since `Expression.createNumber(String)` decides
-  `floating` by testing `strNum.contains(".")`.
-
-### Recommendation
-
-Move negative-literal recognition into `PrologTokenizer`, where the standard
-puts it: when `-` is immediately followed (no layout) by a digit **and** the
-preceding token is not a name/number/close-bracket, emit a single negative
-number token. Then delete the fold at `PrologParser.java:1024` entirely and let
-the shunting-yard treat `-` as an ordinary `200 fy` prefix operator.
-
-That change also fixes 1a and 1b, which are downstream of the same root cause:
-the parser's prefix/infix reduction path assumes an operand it has already
-consumed is still on the stack.
-
-**Please add regression tests for these exact cases before touching anything
-else** — this area has no coverage at all today, and `write/1` will happily
-print a corrupted term in a way that looks plausible. Assert on
-`write_canonical/1` or `=../2`.
+`KnownDefectsTest.minusWithLayoutIsCompound` is the disabled test for this.
 
 ---
 
