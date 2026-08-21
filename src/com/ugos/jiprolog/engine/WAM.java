@@ -83,9 +83,24 @@ class WAM
             return m_callList.getHead();
         }
 
-        final void setGoal(final PrologObject goal)
+        // Sostituisce il goal di questo nodo con la sua forma normalizzata,
+        // senza scrivere nella lista da cui il nodo e' stato costruito:
+        // m_callList e' la coda della lista del padre, quindi una setHead qui
+        // si vedrebbe anche da li'.
+        //
+        // getRulesEnumeration normalizza il goal prima di risolverlo - un Atom
+        // diventa Functor, una Variable diventa il termine a cui e' legata,
+        // M:G perde il qualificatore - e lo faceva scrivendo sulla cella
+        // condivisa. Ma il padre ricostruisce la propria continuazione da
+        // quella stessa coda ad ogni backtracking, e ci ritrovava la forma
+        // normalizzata al posto del goal originale: (g(G), G) rieseguiva per
+        // sempre il primo G, e (m1:p(X), m2:q(Y)) cercava q/1 in m1 dalla
+        // seconda soluzione in poi. Il nodo prende invece una cella tutta sua
+        // sulla stessa coda, cosi' getGoal() vede la forma normalizzata e il
+        // padre no.
+        final void replaceGoal(final PrologObject goal)
         {
-            m_callList.setHead(goal);
+            m_callList = new ConsCell(goal, m_callList.getTail());
         }
 
         final void clearVariables()

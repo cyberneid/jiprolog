@@ -17,7 +17,7 @@ indexing, and an ISO error model that gets the common cases right (`catch/3`,
 `findall/3`, `bagof/setof`, cut, if-then-else and the logical update view all
 behave correctly under test).
 
-The problems are concentrated in three places:
+The problems are concentrated in four places:
 
 1. ~~**The parser silently corrupts terms containing a prefix operator followed
    by an infix operator.** `X is -7 + 1` evaluates to `8`.~~ **Fixed.** Two
@@ -31,6 +31,10 @@ The problems are concentrated in three places:
    tests fail on the pre-fix code.
 3. ~~**No tests, no working build.**~~ **Fixed.** Maven, CI on four JDK/OS
    combinations, 67 tests.
+4. ~~**Goal normalisation writes into the caller's clause body**, so a bare
+   metacall re-runs its first solution forever and a module-qualified goal
+   loses its qualifier after the first solution.~~ **Fixed** (§16). Both give
+   wrong answers rather than errors, and both ship in 4.1.7.1.
 
 Nothing here suggests the design is wrong. The resolution engine, the database
 layer and the API boundary are sound. The findings are localized defects and
@@ -38,8 +42,9 @@ accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
 a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
-§9, §10 and the two resolved bullets of §12 are fixed; §3 is fixed apart from
-the built-in table. 80 tests and a 348-case conformance suite, none disabled. What remains is §11 (error handling and resource management) and §13
+§9, §10, §15, §16 and the two resolved bullets of §12 are fixed; §3 is fixed
+apart from the built-in table. 80 tests and a 441-case conformance suite, none
+disabled. What remains is §11 (error handling and resource management) and §13
 (maintainability), plus the deeper items §10 lists as still open.
 
 ---
@@ -786,8 +791,8 @@ numbers are order-dependent and why one run is not enough.
 This is the finding with the highest leverage, because it is what would have
 caught §1, §4 and §5.
 
-- ~~**No test suite.** Not one automated test in 251 files.~~ **Fixed:** 68
-  JUnit tests, one of which runs a 262-case ISO conformance suite. See the note
+- ~~**No test suite.** Not one automated test in 251 files.~~ **Fixed:** 80
+  JUnit tests, one of which runs a 441-case ISO conformance suite. See the note
   at the end of this section.
 - **`build.xml` does not work from a clean clone.** It references a sibling
   `../jipgui` project, a `../deploy` tree, and
@@ -800,11 +805,14 @@ caught §1, §4 and §5.
 
 ### The conformance suite
 
-`test/resources/iso/` holds 262 cases across ISO sections 7.8 (control
-constructs), 8.2–8.5 (unification, type testing, comparison, term
-construction), 8.6–8.7 and 9 (arithmetic), 8.8–8.10 (clause database and all
-solutions), 8.15 (negation) and 8.16 (atomic term processing).
-`IsoConformanceTest` runs them and fails on any unexpected result. All 262 pass.
+`test/resources/iso/` holds 441 cases across ISO sections 7.8 (control
+constructs, the cut, `catch/3` and `throw/1`), 8.2–8.5 (unification including
+`unify_with_occurs_check/2`, type testing, comparison, term construction),
+8.6–8.7 and 9 (arithmetic), 8.8–8.10 (clause database and all solutions), 8.15
+(negation) and 8.16 (atomic term processing), plus three non-ISO files for
+module-qualified goals, the bare metacall, and the `$!`/`$!!` internal cuts that
+`->`/`*->` are built on. `IsoConformanceTest` runs them and fails on any
+unexpected result. All 441 pass.
 
 The cases are written from the standard rather than taken from an existing
 suite. That was a deliberate choice — vendoring a third-party test corpus of
@@ -874,6 +882,110 @@ observed behaviour.
 
 ---
 
+## 16. Critical — goal normalisation writes into the caller's clause body
+
+Found by extending the coverage of §15 to the areas it had left out, and
+**present in 4.1.7.1 as shipped** — reproduced against an untouched build of
+`master`, not introduced by any of the work above.
+
+Before resolving a goal, `getRulesEnumeration` normalises it: an `Atom` becomes
+a `Functor`, a bound `Variable` becomes the term it is bound to, and `M:G` has
+its qualifier stripped after setting the node's module. Each of those wrote the
+normalised form back through `Node.setGoal`, which is
+`m_callList.setHead(goal)` — and `m_callList` is *the tail of the parent's list*,
+which is to say the caller's own clause body.
+
+The body of a clause is copied once when the clause is selected, not once per
+retry of a goal inside it. So the parent rebuilds its continuation from that
+same list on every backtrack, and from the second solution onward it found the
+previous solution's normalised goal sitting where the original goal used to be.
+
+Two goals were affected, both silently and both with wrong answers rather than
+errors.
+
+**A variable used directly as a goal froze after its first solution.**
+
+```prolog
+g(t1).  g(t2).  g(t3).
+t1.
+t3.                       % t2 has no clauses
+
+?- findall(G, (g(G), G), L).
+L = [t1, t2, t3].         % 4.1.7.1 - and t2 has no clauses at all
+L = [t1, t3].             % correct
+```
+
+`t2` "succeeded" because the goal actually executed all three times was `t1`.
+The same shape with different functors is starker still:
+
+```prolog
+one(1).  one(2).
+three(x).  three(y).  three(z).
+gg(one(_)).  gg(three(_)).
+
+?- findall(S, (gg(G), G, arg(1, G, S)), L).
+L = [1, 2, _107, _109].   % 4.1.7.1 - ran one/1 twice, answers unbound
+L = [1, 2, x, y, z].      % correct
+```
+
+Note that `call(G)` was always correct — `Call1` builds its own node — so the
+bug only ever showed up in the bare metacall.
+
+**A module-qualified goal lost its qualifier and resolved in the wrong module.**
+
+```prolog
+:- assert(m1:p(1)).  :- assert(m1:p(2)).  :- assert(m1:p(3)).
+:- assert(m2:q(a)).  :- assert(m2:q(b)).
+:- assert(m1:q(decoy1)).  :- assert(m1:q(decoy2)).
+
+?- findall(X-Y, (m1:p(X), m2:q(Y)), L).
+L = [1-a, 1-b, 2-decoy1, 2-decoy2, 3-decoy1, 3-decoy2].   % 4.1.7.1
+L = [1-a, 1-b, 2-a, 2-b, 3-a, 3-b].                       % correct
+```
+
+The first solution goes to `m2`, and every later one to whichever module the
+*preceding* goal left the node in. Without a same-named predicate to land on it
+degrades quietly to lost solutions instead — `(m1:p(X), m2:q(Y))` returned two
+pairs rather than six — which is how it stayed invisible: a conjunction of two
+qualified goals in *the same* module works, and so does a qualified goal
+followed by an unqualified one, which covers most real code.
+
+**Fixed** by giving the node its own cons cell on the same tail rather than
+writing through the shared one. `Node.setGoal` is replaced by
+`Node.replaceGoal`:
+
+```java
+final void replaceGoal(final PrologObject goal)
+{
+    m_callList = new ConsCell(goal, m_callList.getTail());
+}
+```
+
+`getGoal()` still sees the normalised form — `WAM.run` unifies against it — and
+the parent's list is left alone. All four normalisation sites (`Atom`,
+`Variable`, `Functor`'s `:` branch, `List`) now use it, and `setGoal` is gone so
+the pattern cannot come back.
+
+Cost: one small `ConsCell` per goal, on a path that already allocates a
+`Hashtable` per node. Two full benchmark runs disagreed on the sign of the
+difference (0.95x and 1.08x total), so it is below this machine's noise floor.
+
+Regression cases: `cases_metacall.pl` (14 cases) and the qualifier-survival
+block in `cases_modules.pl`. They fail 10 cases against the pre-fix build and
+pass on the fixed one; the other 431 cases in the suite are unchanged across
+both, as are 45 corpus goals and 21 parser corpus terms checked side by side.
+
+### What this says about the rest
+
+The defect is not really about modules or metacalls. It is that node state and
+caller state share a mutable structure, and nothing in the type system says
+which of the two a given write belongs to. §10 describes the same engine copying
+clauses eagerly on every resolution step, which is the expensive half of the
+same design decision; this is the cheap half, and it is the one that was wrong.
+Any future change that touches `m_callList` should be read with this in mind.
+
+---
+
 ## What is good, and worth preserving
 
 - **The `JIP*` API boundary is genuinely well done.** Package-private internals,
@@ -883,12 +995,16 @@ observed behaviour.
 - **`JIPClausesDatabase` as a pluggable storage interface** — with JDBC, text
   and indexed in-memory implementations — is a nice piece of design and rare in
   a Prolog of this size.
-- **Correct behaviour under test** for cut (including the `!>`/`$!`/`$!!`
-  soft- and strong-cut extensions), if-then-else, `catch/3` + `throw/1`,
-  `findall/bagof/setof`, `msort/keysort/sort`, `copy_term/2`, `numbervars/3`,
-  module-qualified goals, and the logical update view. The ISO error terms for
-  the common cases (`type_error`, `instantiation_error`, `evaluable`,
-  `callable`, `permission_error(modify, static_procedure, _)`) are all correct.
+- **Correct behaviour under test** for cut (including the `$!`/`$!!` soft- and
+  strong-cut extensions), if-then-else, `catch/3` + `throw/1` and their
+  interaction with the cut, `findall/bagof/setof`, `msort/keysort/sort`,
+  `copy_term/2`, `numbervars/3`, `unify_with_occurs_check/2`, and the logical
+  update view. The ISO error terms for the common cases (`type_error`,
+  `instantiation_error`, `evaluable`, `callable`,
+  `permission_error(modify, static_procedure, _)`) are all correct.
+  Module-qualified goals belonged on this list until §16; they are correct now,
+  but they were not before, and the difference was only ever visible on the
+  second solution.
 - **First-argument indexing** with separate tables per key type.
 - **Heap-allocated resolution nodes** — Prolog recursion depth is bounded by
   heap, not by the Java stack. Many small Java Prologs get this wrong.
@@ -897,5 +1013,7 @@ observed behaviour.
 
 ---
 
-*Review conducted on branch `dev`. Findings §1, §4, §9, §10 and §12 were
-reproduced against a local build; the transcripts are inline above.*
+*Review conducted on branch `dev`. Findings §1, §4, §9, §10, §12 and §16 were
+reproduced against a local build; the transcripts are inline above. §16 was also
+reproduced against an untouched build of `master`, to establish that it ships in
+4.1.7.1 rather than having been introduced here.*

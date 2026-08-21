@@ -169,7 +169,7 @@ class List extends ConsCell
 
          // consult/1
 		 BuiltInPredicate term = new BuiltInPredicate("consult/1", new ConsCell(this, null));
-         curNode.setGoal(term);
+         curNode.replaceGoal(term);
          return new RulesEnumerationBuiltIn(term, curNode.m_strModule, wam);
 	}
 	

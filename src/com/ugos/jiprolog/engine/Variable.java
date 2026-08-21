@@ -350,7 +350,7 @@ final class Variable extends PrologObject//Serializable
 
         if(term != null)
         {
-            curNode.setGoal(term);
+            curNode.replaceGoal(term);
             return term.getRulesEnumeration(curNode, wam);
         }
         else

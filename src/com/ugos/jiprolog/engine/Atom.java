@@ -246,7 +246,7 @@ final class Atom extends PrologObject //implements Serializable
 	@Override
 	public Enumeration<PrologRule> getRulesEnumeration(Node curNode, WAM wam) {
 		Functor term = Functor.getFunctor(this);
-        curNode.setGoal(term);
+        curNode.replaceGoal(term);
         return term.getRulesEnumeration(curNode, wam);
 	}
 }

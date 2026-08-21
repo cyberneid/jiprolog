@@ -100,7 +100,7 @@ if you care to keep it accurate.
 - `ResolutionTest` — unification, backtracking and cut, including whole
   programs checked against independently known answers (six queens has four
   solutions, `tak(14,10,4)` is 5). The slowest class in the suite at ~13 s.
-- `IsoConformanceTest` — runs the 348-case suite in `test/resources/iso/`.
+- `IsoConformanceTest` — runs the 441-case suite in `test/resources/iso/`.
 
 Tests run against the **release** kernel (no `JIPDebugger.debug`), so the suite
 also proves the bootstrap produced a loadable kernel. Surefire uses
@@ -110,8 +110,9 @@ ordering. Drop that setting once the statics are gone.
 
 ### The ISO conformance suite
 
-`test/resources/iso/` is a suite written from ISO/IEC 13211-1, in a small
-data format the runner interprets:
+`test/resources/iso/` is a suite written from ISO/IEC 13211-1 — plus files for
+the non-ISO areas it turned out to need: modules, metacall, and the `$!`/`$!!`
+internal cuts — in a small data format the runner interprets:
 
 ```prolog
 iso(Section, Goal, success).            % has at least one solution
@@ -142,7 +143,7 @@ either a regression or a real deviation — the latter belongs in
 `CODE_REVIEW.md` with the case annotated, not quietly deleted.
 
 Caveat worth keeping in mind: these cases were written against this
-implementation by the same hand, so 262/262 is a weaker signal than an
+implementation by the same hand, so 441/441 is a weaker signal than an
 independent suite would give. Running the real `inriasuite` is still worth
 doing.
 

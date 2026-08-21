@@ -266,7 +266,7 @@ class Functor extends ConsCell
             PrologObject term = ((ConsCell)getParams().getTail()).getHead();
             term = Functor.getFunctor(term);
 
-            curNode.m_callList.setHead(term);
+            curNode.replaceGoal(term);
 
             return term.getRulesEnumeration(curNode, wam);
         }
