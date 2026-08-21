@@ -25,15 +25,6 @@ import java.util.*;
 
 final class PrologParser
 {
-    // I termini che arrivano da una sotto-analisi fra parentesi tonde.
-    // ISO 6.3.4.1: un termine fra parentesi vale priorita' 0 dovunque si
-    // trovi, quindi X = (a ; b) e' legale dove X = a ; b non lo sarebbe. Il
-    // parser non se lo ricordava, e senza questo l'unico modo di applicare i
-    // limiti di priorita' agli operandi sarebbe rifiutare anche i primi.
-    // Identita', non uguaglianza: gli atomi sono internati, i composti no, e
-    // qui dentro finiscono solo composti.
-    private final IdentityHashMap<Object, Object> m_bracketed = new IdentityHashMap<Object, Object>();
-
     private static final int STATE_NONE           = 0;
     private static final int STATE_ROUND_BRACKET  = 1;
     private static final int STATE_SQUARE_BRACKET = 2;
@@ -171,7 +162,6 @@ final class PrologParser
 //      System.out.println("parseNext");
         m_varTable.clear();
         m_singVarTable.clear();
-        m_bracketed.clear();
 
         return translateTerm(STATE_NONE, m_lnReader);
     }
@@ -480,7 +470,6 @@ final class PrologParser
 	                                            }
 	                                            else
 	                                            {
-	                                                m_bracketed.put(term, term);
 	                                                termStack.push(term);
 	                                            }
                                 			}
@@ -504,7 +493,6 @@ final class PrologParser
                                     }
                                     else
                                     {
-                                        m_bracketed.put(term, term);
                                         termStack.push(term);
                                     }
                                 }
@@ -1074,57 +1062,6 @@ final class PrologParser
         }
     }
 
-    // La priorita' di un operando, per il confronto della 6.3.4.3: la
-    // priorita' di un operando non puo' superare quella che la posizione
-    // consente, altrimenti il termine non e' leggibile.
-    private final int operandPriority(final Object obj)
-    {
-        // Un termine fra parentesi vale 0 ovunque.
-        if(m_bracketed.containsKey(obj))
-            return 0;
-
-        // Un atomo che e' anche operatore avrebbe, per la ISO, la priorita'
-        // dell'operatore, e X = not sarebbe da rifiutare. Nessun Prolog in
-        // circolazione lo fa, e rifiutarlo qui spezzerebbe codice che gira
-        // da vent'anni: gli atomi passano.
-        if(obj instanceof Operator || obj instanceof Atom)
-            return 0;
-
-        if(obj instanceof Functor)
-        {
-            final Functor funct = (Functor)obj;
-            final String strName = funct.getFriendlyName();
-            if(!m_opManager.contains(strName))
-                return 0;
-            final Operator o = m_opManager.get(strName);
-            final int nArity = funct.getArity();
-            Operator used = null;
-            if(nArity == 1)
-                used = (o.getPrefix() != null) ? o.getPrefix() : o.getPostfix();
-            else if(nArity == 2)
-                used = o.getInfix();
-            return (used == null) ? 0 : used.getPrecedence();
-        }
-
-        if(obj instanceof ConsCell && !(obj instanceof List))
-            return (((ConsCell)obj).getTail() != null) ? 1000 : 0;
-
-        return 0;
-    }
-
-    // ISO 6.3.4.3: un operando di un operatore di priorita' P sta a P o a
-    // P-1 secondo l'associativita', e un operatore piu' debole li' dentro
-    // va messo fra parentesi. Il parser non lo controllava, quindi
-    // accettava per esempio "a ; dynamic + b", dove dynamic vale 1150 e il
-    // ramo destro di ;/2 arriva a 1100, e ne costruiva un termine che non
-    // si potrebbe riscrivere.
-    private final void checkOperand(final Object obj, final int nMax, final Operator op) throws JIPSyntaxErrorException
-    {
-        if(operandPriority(obj) > nMax)
-            throw new JIPSyntaxErrorException(m_strFileName, (m_lnReader.getLineNumber() + 1),
-                    "operator_priority_clash(" + op.getName() + ")");
-    }
-
     private final PrologObject resolveOperator(Stack termStack, Operator op) throws JIPSyntaxErrorException
     {
         //        System.out.println(termStack.peek());
@@ -1132,7 +1069,6 @@ final class PrologParser
 
         if(op.isPrefix())//prefix
         {
-            checkOperand(obj1, op.isRightAssoc() ? op.getPrecedence() : op.getPrecedence() - 1, op);
             // NB: qui c'era il riconoscimento della costante negativa, fatto
             // ricomponendo la stringa: Expression.createNumber("-" + obj1).
             // Arrivava troppo tardi - a operatore gia' ridotto - e ignorava il
@@ -1148,7 +1084,6 @@ final class PrologParser
         }
         else if(op.isPostfix())// postfix and prefix
         {
-            checkOperand(obj1, op.isLeftAssoc() ? op.getPrecedence() : op.getPrecedence() - 1, op);
             if((!(obj1 instanceof ConsCell)) || obj1 instanceof List || obj1 instanceof Functor || ((ConsCell)obj1).getHeight() != 1)
             {
                 obj1 = new ConsCell(obj1, null);
@@ -1159,8 +1094,6 @@ final class PrologParser
         else if(op.isInfix() && (termStack.size() > 0))
         {
             Object obj2 = termStack.pop();
-            checkOperand(obj2, op.isLeftAssoc()  ? op.getPrecedence() : op.getPrecedence() - 1, op);
-            checkOperand(obj1, op.isRightAssoc() ? op.getPrecedence() : op.getPrecedence() - 1, op);
 //          if(((obj1 instanceof ConsCell)) && !(obj1 instanceof List) && !(obj1 instanceof Functor) && (((ConsCell)obj1).getHeight() == 1))
 //          {
 //              obj1 =  ((ConsCell)obj1).getHead();

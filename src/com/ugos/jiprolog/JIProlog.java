@@ -70,17 +70,25 @@ public class JIProlog
             System.out.println("** Thanks for using JIProlog                     **");
             System.out.println("***************************************************");
         }
+        // Uscire con 0 dopo un errore fatale rende invisibile un fallimento a
+        // chi ci chiama. Il bootstrap delle librerie gira da qui, e quando la
+        // build ha smesso di produrre i .jip Maven ha comunque detto BUILD
+        // SUCCESS: i test sono poi passati sui .jip vecchi rimasti in target,
+        // e la rottura si e' vista solo in CI, che parte pulita.
         catch(IOException ex)
         {
             showMessage(ex.getMessage());
+            System.exit(1);
         }
         catch(JIPSyntaxErrorException ex)
         {
             showMessage(ex.getMessage());
+            System.exit(1);
         }
         catch(JIPRuntimeException ex)
         {
             showMessage(ex.getMessage());
+            System.exit(1);
         }
     }
 

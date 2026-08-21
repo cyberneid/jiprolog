@@ -93,7 +93,7 @@ if you care to keep it accurate.
   the database, lists.
 - `ParserTest` — operator precedence and associativity, asserted through
   `write_canonical/1`. This is the regression net for `PrologParser`;
-  `OperatorAsOperand` and `PriorityClash` are §19's half of it.
+  `OperatorAsOperand` is §19's half of it.
 - `ConcurrencyTest` — four threads, one engine each. This is the harness for the
   shared-static work; every one of its tests fails against the pre-fix sources.
 - `DcgTest`, `ListenerApiTest`, `ReflectionHandleTest` — the areas fixed in
@@ -307,15 +307,15 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
   regression net; if you touch `PrettyPrinter`, its round-trip test is the one
   that matters. Use `write_canonical/1` or `=../2` anyway when debugging the
   parser: it shows the structure without depending on the operator table.
-- The parser enforces operand priority (ISO 6.3.4.3) and raises
-  `syntax_error(operator_priority_clash(Op))` when a subterm binds more loosely
-  than its position allows — `a ; dynamic + b`. It did not, and an atom that is
-  also a prefix operator used to swallow the operator after it: `X = not ; c`
-  read as `=(X, ;(not,c))`. `CODE_REVIEW.md` §19. Two things there are load
-  bearing: bracketed subterms are recorded (`m_bracketed`) because ISO gives
-  them priority 0 and without that the check rejects `xio.pl`'s own
-  `EOS = (not)`; and an atom that is an operator is deliberately let through, so
-  `X = not` still parses as everywhere else.
+- The parser groups by operator priority but does not **enforce** it: it accepts
+  `a ; dynamic + b`, where `dynamic` at 1150 sits under `;` at 1100. Enforcing
+  it is blocked on the kernel, which writes `'$system': \+ G :- ...` — `\+` at
+  900 under `:` at 600 — so the rule would reject `jipkernel.txt` at bootstrap.
+  See `CODE_REVIEW.md` §19, which has the measurements.
+- **Run `mvn clean verify`, not `mvn verify`,** after touching the parser, the
+  kernel or the library sources. A dirty `target/` keeps the previous build's
+  `.jip` files, and the tests will happily pass against a kernel the current
+  sources can no longer produce. `CODE_REVIEW.md` §20.
 - Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
   past it with `evaluation_error(int_overflow)`. That is the limit of the
   `double` the value is held in, so it is a real boundary, not an arbitrary

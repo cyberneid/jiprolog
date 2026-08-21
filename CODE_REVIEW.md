@@ -37,7 +37,9 @@ The problems are concentrated in five places:
    wrong answers rather than errors, and both ship in 4.1.7.1.
 5. ~~**Neither the printer nor the parser bounds operand priority.**
    `writeq/1` output was not re-readable, and `X = not ; c` was read as
-   `=(X, ;(not,c))`.~~ **Fixed** (§17, §19).
+   `=(X, ;(not,c))`.~~ **Fixed** (§17, §19) — except that the parser still
+   *accepts* a term too loose for its position, which cannot be turned on until
+   the kernel's own `Module: \+ Goal` syntax is reconciled with `:` at 600.
 
 Nothing here suggests the design is wrong. The resolution engine, the database
 layer and the API boundary are sound. The findings are localized defects and
@@ -45,10 +47,12 @@ accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
 a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
-§9, §10, §15, §16, §17, §19 and the two resolved bullets of §12 are fixed; §3 is
-fixed apart from the built-in table. 99 tests and a 441-case conformance suite, none
+§9, §10, §15, §16, §17, §20 and the two resolved bullets of §12 are fixed; §19
+is half fixed and §3 all but the built-in table. 97 tests and a 441-case
+conformance suite, none
 disabled. What remains is §11 (error handling and resource management), §13
-(maintainability) and §18, plus the deeper items §10 lists as still open.
+(maintainability), §18, and the enforcement half of §19, plus the deeper items
+§10 lists as still open.
 
 ---
 
@@ -1131,9 +1135,9 @@ of a deliberate pass over it rather than by wrapping the boundary in a
 
 ---
 
-## 19. ~~High — the parser does not enforce operand priority either~~
+## 19. High — operand priority: grouping ~~wrong~~, enforcement still absent
 
-**Fixed**, and the mirror image of §17: the printer was writing without a
+**Half fixed**, and the mirror image of §17: the printer was writing without a
 priority bound, and the reader read without one too. Found by the round-trip
 harness built for §17 — the one term out of 1203 that would not come back was
 not a printer failure.
@@ -1192,30 +1196,52 @@ an atom. Converting it and putting it back in `lastObj` sends the next turn of
 the loop down the ordinary term path, the one that does compare precedences.
 That is the fix, and it is four lines.
 
-### Enforcement, and what it took to make it safe
+### Enforcement: tried, measured, and backed out
 
-Correct grouping is not the whole rule: `a ; dynamic + b` still built
-`dynamic(+(b))` at 1150 under `;/2`, whose right operand tops out at 1100. That
-one has no correct reading — it is a syntax error, and every other Prolog says
-so. `resolveOperator` now checks each operand against the bound its position
-allows and raises `syntax_error(operator_priority_clash(Op))`.
+Correct grouping is not the whole rule. `a ; dynamic + b` still builds
+`dynamic(+(b))` at 1150 under `;/2`, whose right operand tops out at 1100 — a
+term with no correct reading, which every other Prolog rejects. So
+`resolveOperator` was given a check: each operand against the bound its position
+allows, raising `syntax_error(operator_priority_clash(Op))`.
 
-Getting that check to be safe took one thing the parser did not have: **it did
-not remember that a subterm had been bracketed**. ISO 6.3.4.1 gives a bracketed
-term priority 0 wherever it stands, so `X = (a ; b)` is legal where `X = a ; b`
-is not. Without that memory the check has no way to tell them apart, and the
-first measurement showed exactly what that costs — 418 flags over the library
-sources, **every one of them a false positive**, including `xio.pl`'s own
-`EOS = (not)`. The check would have rejected the code it was meant to protect.
+It is not in the tree. What it cost to get there is worth recording, because
+each step was a measurement that said something.
 
-So bracketed terms are recorded on the way out of the sub-parse, by identity —
-atoms are interned and would alias, compounds are freshly built and do not, and
-only compounds reach the set. With that, the same measurement gives zero flags.
+**First**, the check needs to know that a subterm was bracketed. ISO 6.3.4.1
+gives a bracketed term priority 0 wherever it stands, so `X = (a ; b)` is legal
+where `X = a ; b` is not, and the parser did not remember the difference. Run as
+a warning over the library sources before being made an error, it produced **418
+flags, every one a false positive** — `xio.pl`'s own `EOS = (not)` among them.
+Recording bracketed subterms by identity (atoms are interned and would alias;
+compounds are freshly built and do not) brought that to zero.
 
-One deliberate leniency: an atom that is an operator is treated as priority 0
-rather than the operator's own priority, so `X = not` is accepted. Strict ISO
-would reject it. No Prolog in circulation does, and rejecting it here would
-break working code for no gain.
+**Second**, an atom that is an operator has to be let through. Strict ISO gives
+`not` priority 900 as an operand and so rejects `X = not`. No Prolog in
+circulation does that, so it was exempted.
+
+**Third — and this is what killed it — the kernel does not obey the rule
+either.** `jipkernel.txt` opens with
+
+```prolog
+'$system': \+ G :- call(G), !, fail.
+```
+
+`:` is declared `600 xfy`, so its right operand may reach 600. `\+ G` is 900.
+The module-qualification syntax the kernel is written in has been violating its
+own operator table since it was written, and turning the rule on rejects the
+kernel at bootstrap:
+
+```
+error(syntax_error('operator_priority_clash(:)'), undefined)
+  at PrologParser.checkOperand
+  at GlobalDB.loadKernel
+```
+
+Either `:` is declared too tight or the rule cannot be enforced; deciding which
+is a change to the module syntax, not a parser fix. Enforcement was removed and
+the grouping fix kept. `a ; dynamic + b` is still accepted and still builds a
+term that cannot be written back — that half of §19 stays open, and it is the
+half that mis-reads nothing.
 
 ### Measured
 
@@ -1227,20 +1253,49 @@ break working code for no gain.
   that parsed before.
 - Parse cost is unchanged: 20 reparses of every source in the tree, about 24000
   terms, take 1882-1944 ms before and 1834-1942 ms after.
-- `ParserTest` gains `OperatorAsOperand` and `PriorityClash`, seven tests. Five
-  fail against the pre-fix build; the two that pass on both are the guards
-  against over-correcting — that `- - a` and `- a * b` still read as operators,
-  and that brackets still make `a ; (dynamic + b)` legal.
+- `ParserTest` gains `OperatorAsOperand`, five tests. Four fail against the
+  pre-fix build; the fifth is the guard against over-correcting — that `- - a`,
+  `- a * b` and `x is - 1 + 2` still read as operators.
 
 ### What is still not enforced
 
-The bound is checked when an operator is reduced, which covers operands of
-operators. It is not threaded through `translateTerm`, so the 999 limit on an
-*argument* of a compound term and on a *list element* is not enforced:
-`f(a :- b, c)` is still accepted where ISO wants brackets. That is a smaller
-hole than the one closed here — it mis-reads nothing, it only accepts too much —
-and closing it means changing `translateTerm`'s signature through every one of
-its recursive calls.
+No operand priority bound at all, per the above: `a ; dynamic + b` and
+`f(a :- b, c)` are both still accepted. Neither mis-reads anything — the parser
+now groups by priority — they only accept text that should not be a term.
+Closing it needs the `:` question answered first.
+
+---
+
+## 20. Medium — a failed library bootstrap reported `BUILD SUCCESS`
+
+**Fixed.** Found the worst way: by pushing a commit that passed `mvn verify`
+locally and failed all four CI jobs.
+
+`JIProlog.main` caught `IOException`, `JIPSyntaxErrorException` and
+`JIPRuntimeException`, printed the message, and returned — exit code 0. The
+`.jip` bootstrap runs through that entry point, so when it died loading the
+kernel, `exec-maven-plugin` saw success and the build carried on.
+
+Locally that is invisible, because `target/classes` still holds the `.jip` files
+from the previous build and the tests load those. The suite goes green against
+artifacts that the current sources can no longer produce. CI clones fresh, has no
+stale artifacts, and every test fails at once with `Unable to load Kernel`.
+
+```java
+catch(JIPRuntimeException ex)
+{
+    showMessage(ex.getMessage());
+    System.exit(1);          // was: fall through, exit 0
+}
+```
+
+Verified by breaking `jipkernel.txt` on purpose: the build now stops at
+`process-classes` with a `MojoExecutionException` instead of reporting success
+and running the tests against a stale kernel.
+
+Worth keeping in mind beyond the fix: **`mvn verify` on a dirty `target/` is not
+a check that the build works.** Anything that touches the parser, the kernel or
+the library sources wants `mvn clean verify` before it is believed.
 
 ---
 
