@@ -30,8 +30,21 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 {
 	private static final String[] INTERNAL_MODULES = {"jipxlist", "jipsys", "jipxdb", "jipxexception", "jipxio", "jipxreflect", "jipxsets", "jipxsystem", "jipxterms", "jipxxml"};
 
-    // Database
+    // Database, chiave "modulo:nome/arieta"
     private Hashtable<String, JIPClausesDatabase> m_clauseTable;
+
+    // Vista dello stesso contenuto a due livelli: modulo -> nome/arieta -> db.
+    //
+    // Serve al percorso caldo. search() e' chiamata una volta per inferenza e
+    // componeva la chiave "modulo:nome/arieta" con uno StringBuilder a ogni
+    // chiamata, per poi calcolarne l'hash da zero: nel profilo erano il 45%
+    // del tempo totale dell'interprete, piu' del doppio di quanto costasse
+    // l'unificazione. Qui le chiavi sono stringhe che esistono gia' e che
+    // hanno l'hash in cache, quindi il lookup non alloca nulla.
+    //
+    // Scritta soltanto da putDatabase/removeDatabase, insieme a m_clauseTable:
+    // e' l'unica via di scrittura, quindi le due viste non possono divergere.
+    private HashMap<String, HashMap<String, JIPClausesDatabase>> m_moduleIndex;
 
     // associazione tra predicati e file
     private Hashtable<String, String> m_pred2FileMap;
@@ -67,6 +80,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 	private GlobalDB(GlobalDB gdb)
     {
         m_clauseTable            = (Hashtable<String, JIPClausesDatabase>)gdb.m_clauseTable.clone();
+        m_moduleIndex            = cloneModuleIndex(gdb.m_moduleIndex);
         m_pred2FileMap           = (Hashtable<String, String>)gdb.m_pred2FileMap.clone();
         m_moduleTransparentTbl   = (Hashtable<String, String>)gdb.m_moduleTransparentTbl.clone();
         m_exportedTable 		 = (Hashtable<String, String>)gdb.m_exportedTable.clone();
@@ -74,6 +88,70 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
         jipEngine 				 = gdb.jipEngine;
 
+    }
+
+    private static HashMap<String, HashMap<String, JIPClausesDatabase>> cloneModuleIndex(
+            final HashMap<String, HashMap<String, JIPClausesDatabase>> index)
+    {
+        final HashMap<String, HashMap<String, JIPClausesDatabase>> copy =
+                new HashMap<String, HashMap<String, JIPClausesDatabase>>(index.size() * 2);
+
+        for(Map.Entry<String, HashMap<String, JIPClausesDatabase>> entry : index.entrySet())
+        {
+            copy.put(entry.getKey(), new HashMap<String, JIPClausesDatabase>(entry.getValue()));
+        }
+
+        return copy;
+    }
+
+    // Unica via di scrittura della tabella dei predicati: tiene allineate la
+    // mappa piatta e l'indice per modulo.
+    private final void putDatabase(final String strFullName, final JIPClausesDatabase db)
+    {
+        m_clauseTable.put(strFullName, db);
+
+        // il primo ':' e' sempre il separatore, perche' la chiave e' composta
+        // come modulo + ":" + nome/arieta; un predicato che si chiama ':' resta
+        // quindi gestito correttamente
+        final int nColon = strFullName.indexOf(':');
+        if(nColon < 0)
+            return;
+
+        final String strModule = strFullName.substring(0, nColon);
+        final String strPred   = strFullName.substring(nColon + 1);
+
+        HashMap<String, JIPClausesDatabase> module = m_moduleIndex.get(strModule);
+        if(module == null)
+        {
+            module = new HashMap<String, JIPClausesDatabase>();
+            m_moduleIndex.put(strModule, module);
+        }
+
+        module.put(strPred, db);
+    }
+
+    private final JIPClausesDatabase removeDatabase(final String strFullName)
+    {
+        final JIPClausesDatabase db = m_clauseTable.remove(strFullName);
+
+        final int nColon = strFullName.indexOf(':');
+        if(nColon >= 0)
+        {
+            final HashMap<String, JIPClausesDatabase> module =
+                    m_moduleIndex.get(strFullName.substring(0, nColon));
+
+            if(module != null)
+                module.remove(strFullName.substring(nColon + 1));
+        }
+
+        return db;
+    }
+
+    // Lookup senza comporre nulla: e' questo che rende search() economica.
+    private final JIPClausesDatabase lookup(final String strModule, final String strPredName)
+    {
+        final HashMap<String, JIPClausesDatabase> module = m_moduleIndex.get(strModule);
+        return module == null ? null : module.get(strPredName);
     }
 
     public final GlobalDB newInstance(JIPEngine engine)
@@ -86,6 +164,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     public GlobalDB(JIPEngine engine)
     {
         m_clauseTable            = new Hashtable<String, JIPClausesDatabase>();
+        m_moduleIndex            = new HashMap<String, HashMap<String, JIPClausesDatabase>>();
         m_pred2FileMap           = new Hashtable<String, String>();
         m_moduleTransparentTbl   = new Hashtable<String, String>();
         m_exportedTable 		 = new Hashtable<String, String>();
@@ -140,7 +219,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
             db.setJIPEngine(jipEngine);
 
             // Aggiunge il vettore alla tabella
-            m_clauseTable.put(def, db);
+            putDatabase(def, db);
         }
 
         if(db instanceof DefaultClausesDatabase)
@@ -210,7 +289,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     final void makeIndexed(NotIndexedDefaultClausesDatabase db)
     {
     	IndexedDefaultClausesDatabase db1 = new IndexedDefaultClausesDatabase(db);
-        m_clauseTable.put(db.getFullName(), db1);
+        putDatabase(db.getFullName(), db1);
     }
 
     final void dynamic(final String strPredName)
@@ -240,7 +319,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
             db.setJIPEngine(jipEngine);
             // Aggiunge il vettore alla tabella
-            m_clauseTable.put(def, db);
+            putDatabase(def, db);
         }
 
         db.setDynamic();
@@ -281,7 +360,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
             db.setJIPEngine(jipEngine);
             // Aggiunge il vettore alla tabella
-            m_clauseTable.put(def, db);
+            putDatabase(def, db);
         }
 
         db.setExternal();
@@ -315,7 +394,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     	{
     		for(String module : INTERNAL_MODULES)
     		{
-    			if(m_clauseTable.containsKey(new StringBuilder(module).append(':').append(funct).toString()))
+    			if(lookup(module, funct) != null)
     				return true;
     		}
     	}
@@ -504,7 +583,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
                 String key = strModuleName.append(strPredDef).toString();
 
-               	m_clauseTable.remove(key);
+               	removeDatabase(key);
 
                 pred = ((ConsCell)pred).getTail();
             }
@@ -605,7 +684,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
             	throw new JIPPermissionException("modify", "static_procedure", ((Functor)clause.getHead()).m_head, jipEngine);
 
             // Aggiunge il vettore alla tabella
-            m_clauseTable.put(strFunctName, db);
+            putDatabase(strFunctName, db);
         }
 
         if(strFile != null)
@@ -634,25 +713,28 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     	db.setDynamic();
 
         // qui va inserita con modulo user
-        m_clauseTable.put(new StringBuilder(strModuleName).append(':').append(strFuncName).toString(), db);
+        putDatabase(new StringBuilder(strModuleName).append(':').append(strFuncName).toString(), db);
     }
 
     final synchronized JIPClausesDatabase search(final Functor funct, final Stack<String> moduleStack)
     {
     	JIPClausesDatabase db;
 
-    	StringBuilder moduleFunName = new StringBuilder(":").append(funct.getName());
+    	final String strPredName = funct.getName();
+
+    	// l'ordine di visita e' quello dello Stack, dal fondo alla cima, come
+    	// nella versione che componeva le chiavi
     	for(String module : moduleStack)
     	{
-    		db = (JIPClausesDatabase)m_clauseTable.get(new StringBuilder(module).append(moduleFunName).toString());
+    		db = lookup(module, strPredName);
     		if(db != null)
     			return db;
     	}
 
-        db = (JIPClausesDatabase)m_clauseTable.get(USER_MODULE_PREFIX + funct.getName());//":" + funct.getName());
+        db = lookup(USER_MODULE, strPredName);
         if(db == null)
         {
-        	db = (JIPClausesDatabase)m_clauseTable.get(SYSTEM_MODULE_PREFIX + funct.getName());//":" + funct.getName());
+        	db = lookup(SYSTEM_MODULE, strPredName);
         	if(db == null)
         	{
 //        		db = (JIPClausesDatabase)m_clauseTable.get(KERNEL_MODULE + ":" + funct.getName());
@@ -673,20 +755,20 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     {
 //        System.out.println("SearchFor: " + strModule + ":" + funct.getName());  // DBG
 
-        JIPClausesDatabase db = (JIPClausesDatabase)m_clauseTable.get(new StringBuilder(strModule).append(':').append(funct.getName()).toString());
+        JIPClausesDatabase db = lookup(strModule, funct.getName());
 
         if(db == null)
         {
 //            System.out.println("not found in " + strModule);
 //            System.out.println("search in:" + USER_MODULE );  // DBG);
 
-            db = (JIPClausesDatabase)m_clauseTable.get(USER_MODULE_PREFIX + funct.getName());
+            db = lookup(USER_MODULE, funct.getName());
             if(db == null)
             {
 //                System.out.println("not found in " + USER_MODULE);
 //                System.out.println("search in:" + SYSTEM_MODULE);  // DBG);
 
-                return (JIPClausesDatabase)m_clauseTable.get(SYSTEM_MODULE_PREFIX + funct.getName());
+                return lookup(SYSTEM_MODULE, funct.getName());
             }
         }
 
@@ -905,7 +987,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
             	else
             	{
                     m_pred2FileMap.remove(strPredName);
-                    m_clauseTable.remove(strPredName);
+                    removeDatabase(strPredName);
             	}
             }
         }
@@ -939,7 +1021,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 //                	else
 //                	{
 //                        m_pred2FileMap.remove(strPredName);
-//                        m_clauseTable.remove(strPredName);
+//                        removeDatabase(strPredName);
 //                	}
 //                }
 //            }

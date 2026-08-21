@@ -60,6 +60,15 @@ class WAM
         protected Enumeration<PrologRule>  m_ruleEnum;
         protected Hashtable    m_varTbl;
         protected boolean 	   m_bStrongCut;
+
+        // Profondita' di moduleStack quando questo nodo ha generato le proprie
+        // clausole. getRulesEnumeration fa una push per nodo, ma sul
+        // backtracking quelle push non venivano mai annullate: lo stack
+        // cresceva per tutta la durata della query - misurate 28129 voci - e
+        // GlobalDB.search, che lo scandisce, diventava percio' proporzionale
+        // al numero di inferenze gia' eseguite. Segnando qui la profondita' si
+        // puo' ripristinare lo stack quando si torna indietro.
+        protected int          m_nModuleDepth = -1;
         
         Node(final ConsCell callList, final Node parent, final Node previous, final String strModule)
         {
@@ -276,6 +285,20 @@ class WAM
         }
     }
 
+    // Riporta moduleStack a com'era quando questo nodo ha generato le proprie
+    // clausole, piu' la sua stessa voce: il nodo viene ritentato con la
+    // enumeration che possiede gia', quindi la sua push non va rifatta.
+    private final void restoreModuleStack(final Node node)
+    {
+        if(node.m_nModuleDepth < 0)
+            return;
+
+        final int nKeep = node.m_nModuleDepth + 1;
+
+        while(moduleStack.size() > nKeep)
+            moduleStack.pop();
+    }
+
     Node backtrack(Node curNode)
     {
         Node backtrack;
@@ -319,7 +342,10 @@ class WAM
             if(curNode.getGoal() instanceof BuiltInPredicate)
             {
                 if(((BuiltInPredicate)curNode.getGoal()).hasMoreChoicePoints())
+                {
+                    restoreModuleStack(curNode);
                     return curNode;
+                }
             }
             else if(curNode.m_ruleEnum == null)
             {
@@ -333,6 +359,7 @@ class WAM
                 // occorrerebbe eseguire un look-haed per verificare se la prossima
                 // regola unifica
 
+                restoreModuleStack(curNode);
                 return curNode;
             }
 
@@ -367,6 +394,8 @@ class WAM
 	                // altrimenti ne genera di nuove
 	                if(curNode.m_ruleEnum == null)
 	                {
+	                    curNode.m_nModuleDepth = moduleStack.size();
+
 	                    try
 	                    {
 	                        curNode.m_ruleEnum = getRules(curNode);
