@@ -43,14 +43,6 @@ class EventNotifier extends Object implements Runnable
 //        m_workerThread.start();
     }
 
-    //#ifndef _MIDP
-    protected final void finalize() throws Throwable
-    {
-        //System.out.println("Finalize");
-        m_workerThread = null;
-    }
-    //#endif
-
     public final synchronized void addEventListener(final JIPEventListener listener)
     {
         if(!m_EventListenerVect.contains(listener))
@@ -59,13 +51,14 @@ class EventNotifier extends Object implements Runnable
 
     public final synchronized void removeEventListener(final JIPEventListener listener)
     {
-        if(!m_EventListenerVect.contains(listener))
+        if(m_EventListenerVect.contains(listener))
             m_EventListenerVect.removeElement(listener);
     }
 
+    // torna una copia: il chiamante non deve poter modificare la lista interna
     public final synchronized Vector getEventListeners()
     {
-        return m_EventListenerVect;
+        return new Vector(m_EventListenerVect);
     }
 
 //  #ifndef _MIDP
@@ -81,9 +74,10 @@ class EventNotifier extends Object implements Runnable
             m_TraceListenerVect.removeElement(listener);
     }
 
+    // torna una copia: il chiamante non deve poter modificare la lista interna
     public final synchronized Vector getTraceListeners()
     {
-        return m_TraceListenerVect;
+        return new Vector(m_TraceListenerVect);
     }
 
     //#endif

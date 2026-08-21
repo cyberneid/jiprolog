@@ -18,16 +18,14 @@
 
 package com.ugos.jiprolog;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import com.ugos.jiprolog.engine.JIPErrorEvent;
-import com.ugos.jiprolog.engine.JIPEvent;
-import com.ugos.jiprolog.engine.JIPEventListener;
 
 /**
  * Executable specifications for the defects recorded in CODE_REVIEW.md.
@@ -39,6 +37,9 @@ import com.ugos.jiprolog.engine.JIPEventListener;
  *
  * <p>Do not "fix" these by changing the expected values to match what the
  * engine currently does. That would turn a bug report into a specification.
+ *
+ * <p>Sections 4 and 12 used to live here and are now fixed; their tests moved
+ * to ListenerApiTest.
  *
  * <p>Sections 2 and 3 of the review - the statically pinned DCG engine and the
  * shared mutable statics - are not covered here. Both need a multi-engine or
@@ -113,44 +114,5 @@ public class KnownDefectsTest extends PrologTestBase
     public void integerRange()
     {
         assertEquals("6227020800", valueOf("X is 13 * 479001600", "X"));
-    }
-
-    // ---------------------------------------------------------------- section 4
-
-    @Test
-    @Disabled("CODE_REVIEW.md section 4 - EventNotifier.removeEventListener has an inverted condition")
-    @DisplayName("removeEventListener actually removes the listener")
-    public void removeEventListenerRemoves()
-    {
-        JIPEventListener listener = new NullEventListener();
-        engine.addEventListener(listener);
-        assertEquals(1, engine.getEventListeners().size());
-        engine.removeEventListener(listener);
-        assertEquals(0, engine.getEventListeners().size());
-    }
-
-    // ---------------------------------------------------------------- section 12
-
-    @Test
-    @Disabled("CODE_REVIEW.md section 12 - getEventListeners exposes the live internal Vector")
-    @DisplayName("the listener collection is not modifiable from outside")
-    public void listenerCollectionIsNotExposed()
-    {
-        engine.addEventListener(new NullEventListener());
-        engine.getEventListeners().clear();
-        assertEquals(1, engine.getEventListeners().size(),
-                "clearing the returned collection must not deregister the listener");
-    }
-
-    /** Minimal listener: the tests above only count registrations. */
-    private static final class NullEventListener implements JIPEventListener
-    {
-        public void openNotified(JIPEvent event) { }
-        public void closeNotified(JIPEvent event) { }
-        public void solutionNotified(JIPEvent event) { }
-        public void moreNotified(JIPEvent event) { }
-        public void endNotified(JIPEvent event) { }
-        public void errorNotified(JIPErrorEvent event) { }
-        public void termNotified(JIPEvent event) { }
     }
 }

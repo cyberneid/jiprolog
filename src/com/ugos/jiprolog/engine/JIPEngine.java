@@ -371,8 +371,12 @@ public class JIPEngine implements Serializable
         m_eventNotifier.removeEventListener(listener);
     }
 
-    /** Gets the list of JIPEventListeners
+    /** Gets the list of JIPEventListeners.
+     * The returned Vector is a copy: modifying it does not add or remove
+     * listeners. Use addEventListener and removeEventListener for that.
      * @return Vector containing the registered JIPEventListener objects
+     * @see com.ugos.jiprolog.engine.JIPEngine#addEventListener
+     * @see com.ugos.jiprolog.engine.JIPEngine#removeEventListener
      * @see com.ugos.jiprolog.engine.JIPEventListener
      */
     public Vector getEventListeners()
@@ -399,8 +403,12 @@ public class JIPEngine implements Serializable
     }
 
 
-    /** Gets the list of JIPTraceListener
+    /** Gets the list of JIPTraceListener.
+     * The returned Vector is a copy: modifying it does not add or remove
+     * listeners. Use addTraceListener and removeTraceListener for that.
      * @return Vector of listeners
+     * @see com.ugos.jiprolog.engine.JIPEngine#addTraceListener
+     * @see com.ugos.jiprolog.engine.JIPEngine#removeTraceListener
      * @see com.ugos.jiprolog.engine.JIPTraceListener
      */
     public Vector getTraceListeners()
