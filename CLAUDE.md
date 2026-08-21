@@ -92,7 +92,8 @@ if you care to keep it accurate.
 - `BuiltInsTest` — the passing baseline: arithmetic, terms, control constructs,
   the database, lists.
 - `ParserTest` — operator precedence and associativity, asserted through
-  `write_canonical/1`. This is the regression net for `PrologParser`.
+  `write_canonical/1`. This is the regression net for `PrologParser`;
+  `OperatorAsOperand` and `PriorityClash` are §19's half of it.
 - `ConcurrencyTest` — four threads, one engine each. This is the harness for the
   shared-static work; every one of its tests fails against the pre-fix sources.
 - `DcgTest`, `ListenerApiTest`, `ReflectionHandleTest` — the areas fixed in
@@ -306,11 +307,15 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
   regression net; if you touch `PrettyPrinter`, its round-trip test is the one
   that matters. Use `write_canonical/1` or `=../2` anyway when debugging the
   parser: it shows the structure without depending on the operator table.
-- **The parser does not enforce operand priority** — `X = (a -> b = not ; c)`
-  parses as `a -> b = (not ; c)`, which is not a legal reading, because `;` at
-  1100 cannot be the right operand of `=` at 700. It needs the operand to be an
-  atom that is itself an operator, which is why it is rare. `xio.pl` writes
-  `EOS = (not)` with hand-added brackets to dodge it. See `CODE_REVIEW.md` §19.
+- The parser enforces operand priority (ISO 6.3.4.3) and raises
+  `syntax_error(operator_priority_clash(Op))` when a subterm binds more loosely
+  than its position allows — `a ; dynamic + b`. It did not, and an atom that is
+  also a prefix operator used to swallow the operator after it: `X = not ; c`
+  read as `=(X, ;(not,c))`. `CODE_REVIEW.md` §19. Two things there are load
+  bearing: bracketed subterms are recorded (`m_bracketed`) because ISO gives
+  them priority 0 and without that the check rejects `xio.pl`'s own
+  `EOS = (not)`; and an atom that is an operator is deliberately let through, so
+  `X = not` still parses as everywhere else.
 - Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
   past it with `evaluation_error(int_overflow)`. That is the limit of the
   `double` the value is held in, so it is a real boundary, not an arbitrary

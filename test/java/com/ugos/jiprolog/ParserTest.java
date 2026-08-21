@@ -19,11 +19,14 @@
 package com.ugos.jiprolog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import com.ugos.jiprolog.engine.JIPSyntaxErrorException;
 
 /**
  * Operator parsing, asserted through write_canonical/1 so that the operator
@@ -195,6 +198,106 @@ public class ParserTest extends PrologTestBase
             assertEquals("-(a)", canonical("-(a)"));
             assertEquals("-(3,4)", canonical("-(3,4)"));
             assertEquals("*(1,-2)", canonical("1 * -2"));
+        }
+    }
+
+    /**
+     * ISO/IEC 13211-1 6.3.4 - an operand may not be a term that binds more
+     * loosely than its position allows.
+     *
+     * <p>The trigger is an atom that is itself a prefix operator. It was pushed
+     * on the stack as an operator, betting that an operand would follow; when
+     * an infix operator followed instead, the bet was never revisited and the
+     * incoming operator went on top of it without any precedence comparison.
+     * {@code X = not ; c} came out as {@code =(X, ;(not,c))} - a 1100 term
+     * under an operator that allows 699. See CODE_REVIEW.md section 19.
+     */
+    @Nested
+    @DisplayName("an atom that is also a prefix operator, used as an operand")
+    public class OperatorAsOperand extends PrologTestBase
+    {
+        @Test
+        @DisplayName("does not swallow the operator that follows it")
+        public void doesNotSwallowTheFollowingOperator()
+        {
+            assertEquals(";(=(x,not),c)",  canonical("x = not ; c"));
+            assertEquals(";(=(x,-),c)",    canonical("x = - ; c"));
+            assertEquals(";(=(x,spy),y)",  canonical("x = spy ; y"));
+            assertEquals(";(=(a,dynamic),b)", canonical("a = dynamic ; b"));
+        }
+
+        @Test
+        @DisplayName("parses the same bracketed and unbracketed")
+        public void bracketedAndUnbracketedAgree()
+        {
+            assertEquals(canonical("x = (not) ; c"), canonical("x = not ; c"));
+            assertEquals(canonical("x = (-) ; c"),   canonical("x = - ; c"));
+        }
+
+        @Test
+        @DisplayName("and behaves like any other atom there")
+        public void behavesLikeAnyOtherAtom()
+        {
+            // nn is not an operator; not is. They group the same way.
+            assertEquals(";(=(x,nn),c)",           canonical("x = nn ; c"));
+            assertEquals(";(=(x,not),c)",          canonical("x = not ; c"));
+            assertEquals("','(=(x,nn),y)",          canonical("x = nn , y"));
+            assertEquals("','(=(x,not),y)",         canonical("x = not , y"));
+            assertEquals(";(->(=(x,nn),y),z)",     canonical("x = nn -> y ; z"));
+            assertEquals(";(->(=(x,not),y),z)",    canonical("x = not -> y ; z"));
+        }
+
+        @Test
+        @DisplayName("in deeper positions too")
+        public void deeperPositions()
+        {
+            assertEquals(";(->(a,=(b,not)),c)", canonical("a -> b = not ; c"));
+            assertEquals(":-(p,;(=(q,not),r))", canonical("(p :- q = not ; r)"));
+            assertEquals("','(a,','(not,b))", canonical("(a , not , b)"));
+            assertEquals("'.'(not,'.'(y,'.'(z,[])))", canonical("[not, y, z]"));
+        }
+
+        @Test
+        @DisplayName("is still an operator when an operand does follow")
+        public void stillAnOperatorWhenItHasAnOperand()
+        {
+            assertEquals("-(-(a))", canonical("- - a"));
+            assertEquals("*(-(a),b)", canonical("- a * b"));
+            assertEquals("is(x,+(-(1),2))", canonical("x is - 1 + 2"));
+            assertEquals("f(-,a)", canonical("f(-, a)"));
+        }
+    }
+
+    /**
+     * The other half of the same rule: a term too loose for its position is a
+     * syntax error, not something to build anyway.
+     */
+    @Nested
+    @DisplayName("an operand above the priority its position allows")
+    public class PriorityClash extends PrologTestBase
+    {
+        private void rejects(String term)
+        {
+            // dynamic and spy are 1150 fx, above the 1100 that the right of
+            // ;/2 allows and the 1000 that the right of ','/2 allows
+            assertThrows(JIPSyntaxErrorException.class, () -> engine.getTermParser().parseTerm(term));
+        }
+
+        @Test
+        @DisplayName("is refused rather than built")
+        public void refused()
+        {
+            rejects("a ; dynamic + b");
+            rejects("a , dynamic - b");
+            rejects("a -> dynamic + b");
+        }
+
+        @Test
+        @DisplayName("but brackets make it legal again")
+        public void bracketsMakeItLegal()
+        {
+            assertEquals(";(a,dynamic(+(b)))", canonical("a ; (dynamic + b)"));
+            assertEquals("','(a,dynamic(-(b)))", canonical("a , (dynamic - b)"));
         }
     }
 }

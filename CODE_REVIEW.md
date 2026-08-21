@@ -35,9 +35,9 @@ The problems are concentrated in five places:
    metacall re-runs its first solution forever and a module-qualified goal
    loses its qualifier after the first solution.~~ **Fixed** (§16). Both give
    wrong answers rather than errors, and both ship in 4.1.7.1.
-5. **Neither the printer nor the parser bounds operand priority.** `writeq/1`
-   output was not re-readable (§17, ~~fixed~~); the parser still accepts an
-   operator too loose for the position it is in (§19, open).
+5. ~~**Neither the printer nor the parser bounds operand priority.**
+   `writeq/1` output was not re-readable, and `X = not ; c` was read as
+   `=(X, ;(not,c))`.~~ **Fixed** (§17, §19).
 
 Nothing here suggests the design is wrong. The resolution engine, the database
 layer and the API boundary are sound. The findings are localized defects and
@@ -45,12 +45,10 @@ accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
 a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
-§9, §10, §15, §16 and the two resolved bullets of §12 are fixed; §3 is fixed
-apart from the built-in table. 80 tests and a 441-case conformance suite, none
+§9, §10, §15, §16, §17, §19 and the two resolved bullets of §12 are fixed; §3 is
+fixed apart from the built-in table. 99 tests and a 441-case conformance suite, none
 disabled. What remains is §11 (error handling and resource management), §13
-(maintainability), §18, and §19 — the parser does not enforce operand priority,
-which is what §17 turned out to be the other half of — plus the deeper items §10
-lists as still open.
+(maintainability) and §18, plus the deeper items §10 lists as still open.
 
 ---
 
@@ -1133,10 +1131,10 @@ of a deliberate pass over it rather than by wrapping the boundary in a
 
 ---
 
-## 19. High — the parser does not enforce operand priority either
+## 19. ~~High — the parser does not enforce operand priority either~~
 
-**Open**, and the mirror image of §17: the printer was writing without a
-priority bound, and the reader reads without one too. Found by the round-trip
+**Fixed**, and the mirror image of §17: the printer was writing without a
+priority bound, and the reader read without one too. Found by the round-trip
 harness built for §17 — the one term out of 1203 that would not come back was
 not a printer failure.
 
@@ -1169,13 +1167,80 @@ The author has met it before. `xio.pl` writes
 with brackets that ISO does not require around an operand of `=`, and the same
 workaround appears in every clause of that predicate.
 
-Where §17 was contained to `PrettyPrinter`, this is `PrologParser` — the file
-§13 flags as least maintainable, ~1250 lines and ~15 levels of nesting, and the
-one that §1 has already been through once. The fix is to carry the operand's
-maximum priority down `translateTerm` and refuse an operator above it, which is
-the same information the shunting-yard already has in `curOp`/`lastOp` but does
-not compare. It wants doing as a deliberate pass over that file, with
-`ParserTest` extended first.
+### Where it actually goes wrong
+
+Not where it looks. The shunting-yard does compare precedences — but only on the
+path where the previous token left a *term* behind. An atom that is also a prefix
+operator does not: it is pushed on the stack as an `Operator`, betting that an
+operand will follow. When an infix operator arrives instead, one branch takes it:
+
+```java
+else // if(curOp.getInfix() != null)
+{
+    termStack.push(curOp.getInfix());     // on top of a dangling prefix operator
+    lastObj = null;                       // ...and no precedence compared, ever
+}
+```
+
+`resolveStack` then unwinds right to left, which groups by position rather than
+by priority. That is the whole defect: `x = not ; c` builds `;` before `=`
+because nothing ever asked which binds tighter.
+
+The bet is simply never revisited. `curOp` cannot start a term, so the operand
+the prefix operator was waiting for does not exist and never will — the atom was
+an atom. Converting it and putting it back in `lastObj` sends the next turn of
+the loop down the ordinary term path, the one that does compare precedences.
+That is the fix, and it is four lines.
+
+### Enforcement, and what it took to make it safe
+
+Correct grouping is not the whole rule: `a ; dynamic + b` still built
+`dynamic(+(b))` at 1150 under `;/2`, whose right operand tops out at 1100. That
+one has no correct reading — it is a syntax error, and every other Prolog says
+so. `resolveOperator` now checks each operand against the bound its position
+allows and raises `syntax_error(operator_priority_clash(Op))`.
+
+Getting that check to be safe took one thing the parser did not have: **it did
+not remember that a subterm had been bracketed**. ISO 6.3.4.1 gives a bracketed
+term priority 0 wherever it stands, so `X = (a ; b)` is legal where `X = a ; b`
+is not. Without that memory the check has no way to tell them apart, and the
+first measurement showed exactly what that costs — 418 flags over the library
+sources, **every one of them a false positive**, including `xio.pl`'s own
+`EOS = (not)`. The check would have rejected the code it was meant to protect.
+
+So bracketed terms are recorded on the way out of the sub-parse, by identity —
+atoms are interned and would alias, compounds are freshly built and do not, and
+only compounds reach the set. With that, the same measurement gives zero flags.
+
+One deliberate leniency: an atom that is an operator is treated as priority 0
+rather than the operator's own priority, so `X = not` is accepted. Strict ISO
+would reject it. No Prolog in circulation does, and rejecting it here would
+break working code for no gain.
+
+### Measured
+
+- The 1203 terms of the library sources and the conformance suite parse to
+  **byte-identical** canonical forms before and after. The fix changes nothing
+  about code that was already being read correctly.
+- A sweep of ~2900 `A op1 <operator-atom> op2 B` combinations produces no
+  priority violation that survives the fix, and no new syntax error on anything
+  that parsed before.
+- Parse cost is unchanged: 20 reparses of every source in the tree, about 24000
+  terms, take 1882-1944 ms before and 1834-1942 ms after.
+- `ParserTest` gains `OperatorAsOperand` and `PriorityClash`, seven tests. Five
+  fail against the pre-fix build; the two that pass on both are the guards
+  against over-correcting — that `- - a` and `- a * b` still read as operators,
+  and that brackets still make `a ; (dynamic + b)` legal.
+
+### What is still not enforced
+
+The bound is checked when an operator is reduced, which covers operands of
+operators. It is not threaded through `translateTerm`, so the 999 limit on an
+*argument* of a compound term and on a *list element* is not enforced:
+`f(a :- b, c)` is still accepted where ISO wants brackets. That is a smaller
+hole than the one closed here — it mis-reads nothing, it only accepts too much —
+and closing it means changing `translateTerm`'s signature through every one of
+its recursive calls.
 
 ---
 

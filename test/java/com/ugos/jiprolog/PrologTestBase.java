@@ -117,7 +117,11 @@ public abstract class PrologTestBase
      */
     protected String canonical(String term)
     {
-        return captureOutput("write_canonical(" + term + ")");
+        // Il termine si racchiude fra parentesi prima di finire nel goal.
+        // ((T)) e' T, e impedisce che un termine con ','/2 in testa arrivi
+        // come secondo argomento, chiamando write_canonical/2 e chiedendo uno
+        // stream.
+        return captureOutput("write_canonical((" + term + "))");
     }
 
     /** Runs the goal with user_output redirected, and returns what it wrote. */
