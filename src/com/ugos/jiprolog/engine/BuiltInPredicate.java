@@ -72,11 +72,25 @@ final class BuiltInPredicate extends Functor
         m_builtIn = null;
     }
 
-    public final boolean _unify(final PrologObject obj, final Hashtable<Variable, Variable> table)
+    public final boolean _unify(final PrologObject obj, final VariableTrail table)
     {
         if (m_builtIn != null)
         {
-            return m_builtIn.unify(getParams(), table);
+            // I built-in registrano i propri legami in una Hashtable: e' la
+            // firma di BuiltIn.unify, condivisa da un centinaio di classi, e
+            // non la si cambia da qui. Le variabili legate passano poi nel
+            // trail, cosi' chi ha iniziato l'unificazione le vede e sa
+            // annullarle.
+            final Hashtable<Variable, Variable> vars = new Hashtable<Variable, Variable>(10);
+
+            if(!m_builtIn.unify(getParams(), vars))
+                return false;
+
+            final Enumeration<Variable> en = vars.keys();
+            while(en.hasMoreElements())
+                table.add(en.nextElement());
+
+            return true;
         }
         else
         {

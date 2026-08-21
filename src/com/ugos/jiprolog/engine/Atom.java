@@ -147,7 +147,7 @@ final class Atom extends PrologObject //implements Serializable
         return this;
     }
 
-    public final boolean _unify(PrologObject obj, final Hashtable<Variable, Variable> table)
+    public final boolean _unify(PrologObject obj, final VariableTrail table)
     {
     	if(obj instanceof Variable)
         {

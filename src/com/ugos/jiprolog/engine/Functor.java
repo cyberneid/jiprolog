@@ -107,7 +107,7 @@ class Functor extends ConsCell
         m_head = Atom.createAtom(m_strName);
     }
 
-    public boolean _unify(PrologObject obj, final Hashtable<Variable, Variable> table)
+    public boolean _unify(PrologObject obj, final VariableTrail table)
     {
     	if(obj instanceof Variable)
         {

@@ -60,7 +60,7 @@ class ConsCell extends PrologObject //implements Serializable
         }
     }
 
-    public boolean _unify(PrologObject obj, final Hashtable<Variable, Variable> table)
+    public boolean _unify(PrologObject obj, final VariableTrail table)
     {
     	if(obj instanceof Variable)
         {

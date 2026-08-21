@@ -167,7 +167,7 @@ final class PString extends List //implements Serializable
     }
 
     @Override
-    public final boolean _unify(PrologObject obj, final Hashtable table)
+    public final boolean _unify(PrologObject obj, final VariableTrail table)
     {
     	if(obj instanceof Variable)
         {

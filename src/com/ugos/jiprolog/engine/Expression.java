@@ -96,7 +96,7 @@ final class Expression extends PrologObject //implements Serializable
     }
 
     @Override
-    public final boolean _unify(PrologObject obj, final Hashtable<Variable, Variable> table)
+    public final boolean _unify(PrologObject obj, final VariableTrail table)
     {
         //System.out.println("Match Expression");
         if(obj instanceof Variable)

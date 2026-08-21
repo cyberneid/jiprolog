@@ -44,7 +44,7 @@ class List extends ConsCell
         //super(list.getHead(), list.getTail());
     }
 
-    public boolean _unify(PrologObject obj, final Hashtable table)
+    public boolean _unify(PrologObject obj, final VariableTrail table)
     {
     	if(obj instanceof Variable)
         {
@@ -81,7 +81,11 @@ class List extends ConsCell
                         }
                         else
                         {
-                        	return ((ConsCell)obj).m_tail.unify(List.NIL, table);
+                        	// _unify e non unify: siamo gia' dentro
+                        	// un'unificazione, e chi l'ha iniziata annulla il
+                        	// trail se fallisce. unify() avrebbe allocato
+                        	// un'altra tabella temporanea per nulla.
+                        	return ((ConsCell)obj).m_tail._unify(List.NIL, table);
                         }
                     }
                 }

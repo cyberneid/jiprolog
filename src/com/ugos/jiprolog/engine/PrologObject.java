@@ -62,14 +62,11 @@ abstract class PrologObject implements Clearable, Serializable
 
 	public final boolean unifiable(final PrologObject obj)
     {
-        Hashtable<Variable, Variable> vartbl = new Hashtable<Variable, Variable>(10);
-        boolean bUnify = _unify(obj, vartbl);
+        final VariableTrail trail = new VariableTrail();
+        final boolean bUnify = _unify(obj, trail);
 
-        Enumeration<Variable> en = vartbl.keys();
-        while(en.hasMoreElements())
-        {
-            en.nextElement().clear();
-        }
+        // prova soltanto: i legami vanno annullati comunque
+        trail.undo();
 
         return bUnify;
     }
@@ -79,30 +76,28 @@ abstract class PrologObject implements Clearable, Serializable
 //        System.out.println(toString() + " == " + obj.toString());
 //        System.out.println(getClass().toString() + " == " + obj.getClass().toString());
 
-        final Hashtable<Variable, Variable> _varTbl = new Hashtable<Variable, Variable>(10);
-        Enumeration<Variable> en;
-        if(_unify(obj, _varTbl))
+        // Il trail sostituisce la Hashtable temporanea che veniva allocata a
+        // ogni tentativo di match: serviva solo a sapere quali variabili
+        // annullare in caso di fallimento, e per quello un array basta.
+        final VariableTrail trail = new VariableTrail();
+
+        if(_unify(obj, trail))
         {
-            // riporta le variabili instanziate nella vartable
-            Variable var;
-            en = _varTbl.keys();
-            while(en.hasMoreElements())
+            // riporta le variabili instanziate nella vartable del chiamante
+            final int nSize = trail.size();
+            for(int i = 0; i < nSize; i++)
             {
-                var = en.nextElement();
+                final Variable var = trail.get(i);
                 varTbl.put(var, var);
             }
 
             return true;
         }
-        else
-        {
-            // ripulisce le variabili eventualmente instanziate
-            en = _varTbl.keys();
-            while(en.hasMoreElements())
-                ((Clearable)en.nextElement()).clear();
 
-            return false;
-        }
+        // ripulisce le variabili eventualmente instanziate
+        trail.undo();
+
+        return false;
     }
 
     public final String toString()
@@ -197,7 +192,7 @@ abstract class PrologObject implements Clearable, Serializable
     public abstract void clear();
     public abstract PrologObject copy(boolean flat, Hashtable<Variable, PrologObject> varTable);
     protected abstract boolean lessThen(PrologObject obj);
-    protected abstract boolean _unify(PrologObject obj, Hashtable<Variable, Variable> varTbl);
+    protected abstract boolean _unify(PrologObject obj, VariableTrail varTbl);
     public abstract boolean termEquals(PrologObject obj);
 
     public abstract Enumeration<PrologRule> getRulesEnumeration(Node curNode, WAM wam);
