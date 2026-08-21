@@ -33,6 +33,15 @@ final class Expression extends PrologObject //implements Serializable
     private final double m_dValue;
     private boolean floating = false;
 
+    // Tutti i numeri stanno in un double, quindi un intero e' esatto solo fino
+    // a 2^53: oltre, l'aritmetica perderebbe precisione in silenzio ed e'
+    // meglio un int_overflow. Il limite era MAX_INTEGER, che buttava via
+    // 22 bit di interi comunque esatti - 13! non si poteva calcolare.
+    // Il confronto e' su 2^53-1 e non su 2^53 perche' un prodotto vero di
+    // 2^53+1 arrotonda a 2^53, che va comunque respinto.
+    static final double MAX_INTEGER =  9007199254740991.0;   //  2^53 - 1
+    static final double MIN_INTEGER = -9007199254740991.0;   // -2^53 + 1
+
     public static Expression createNumber(final double dNum)
     {
         return new Expression(dNum);
@@ -78,7 +87,7 @@ final class Expression extends PrologObject //implements Serializable
             throw new JIPEvaluationException("undefined");
 
         m_dValue   = dNum;
-        floating = (int)dNum != dNum;
+        floating = (long)dNum != dNum;
     }
 
     public final PrologObject copy(final boolean flat, final Hashtable<Variable, PrologObject> varTable)
@@ -173,7 +182,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -187,7 +196,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -256,7 +265,7 @@ final class Expression extends PrologObject //implements Serializable
 
                             dblVal =  Math.rint(dVal1);
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -268,7 +277,7 @@ final class Expression extends PrologObject //implements Serializable
 
                             dblVal =  Math.round(dVal1);
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -280,7 +289,7 @@ final class Expression extends PrologObject //implements Serializable
 
                             dblVal =  Math.ceil(dVal1);
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -291,7 +300,7 @@ final class Expression extends PrologObject //implements Serializable
                             dVal1 = exp1.m_dValue;
 
                             dblVal =  Math.floor(dVal1);
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -301,7 +310,7 @@ final class Expression extends PrologObject //implements Serializable
                             Expression exp1 = Expression.compute(params.getHead());
                             dVal1 = exp1.m_dValue;
 
-                            dblVal =  (int)dVal1;
+                            dblVal =  (long)dVal1;
                             return Expression.createNumber(dblVal);
                         }
                         else if (strFunName.equals("float"))
@@ -316,15 +325,18 @@ final class Expression extends PrologObject //implements Serializable
                             Expression exp1 = Expression.compute(params.getHead());
                             dVal1 = exp1.m_dValue;
 
-                            dblVal =  dVal1 - (int)dVal1;
+                            dblVal =  dVal1 - (long)dVal1;
                         }
                         else if (strFunName.equals("float_integer_part"))
                         {
                             Expression exp1 = Expression.compute(params.getHead());
                             dVal1 = exp1.m_dValue;
 
-                            dblVal =  dVal1 - (int)dVal1;
-                            return Expression.createNumber(dblVal);
+                            // NB: qui c'era "dVal1 - (int)dVal1", cioe' la
+                            // parte frazionaria: la stessa identica espressione
+                            // del ramo float_fractional_part qui sopra.
+                            dblVal =  (long)dVal1;
+                            return Expression.createDouble(dblVal);
                         }
                         else if (strFunName.equals("abs"))
                         {
@@ -335,7 +347,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -352,7 +364,7 @@ final class Expression extends PrologObject //implements Serializable
                             Expression exp1 = Expression.compute(params.getHead());
                             dVal1 = exp1.m_dValue;
 
-                            if(!exp1.floating && (dVal1 > Integer.MAX_VALUE || dVal1 < Integer.MIN_VALUE))
+                            if(!exp1.floating && (dVal1 > MAX_INTEGER || dVal1 < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             if(dVal1 > 0)
@@ -370,7 +382,7 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp1.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp1);
 
-                            dblVal =  ~(int)dVal1;
+                            dblVal =  ~(long)dVal1;
                             return Expression.createNumber(dblVal);
                         }
                         else if(strFunName.equals("random")) // random
@@ -410,7 +422,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger() || !exp2.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -432,7 +444,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger() || !exp2.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -488,12 +500,12 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            if((int)dVal2 == 0)
+                            if((long)dVal2 == 0)
                                 throw new JIPEvaluationException(JIPEvaluationException.zero_divisor);
 
-                            dblVal =  ((int)dVal1 / (int)dVal2);
+                            dblVal =  ((long)dVal1 / (long)dVal2);
 
-                            if((dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if((dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -513,7 +525,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger() || !exp2.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -531,11 +543,10 @@ final class Expression extends PrologObject //implements Serializable
 
                             dblVal =  Math.pow(dVal1, dVal2);
 
-                            retexp = Expression.createNumber(dblVal);
-//                            if(dblVal <= Integer.MAX_VALUE)
-//                                retexp.floating = !exp1.isInteger() || !exp2.isInteger();
-
-                            return retexp;
+                            // ISO 9.3.1: **/2 e' l'elevamento in virgola
+                            // mobile e torna sempre un float, anche con
+                            // argomenti interi. Per l'intero c'e' ^/2.
+                            return Expression.createDouble(dblVal);
                         }
                         else if (strFunName.equals("^"))
                         {
@@ -582,7 +593,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger() || !exp2.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -603,7 +614,7 @@ final class Expression extends PrologObject //implements Serializable
                             retexp = Expression.createNumber(dblVal);
                             retexp.floating = !exp1.isInteger() || !exp2.isInteger();
 
-                            if(!retexp.floating && (dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE))
+                            if(!retexp.floating && (dblVal > MAX_INTEGER || dblVal < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
                             return retexp;
@@ -625,12 +636,12 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            if((int)dVal2 == 0)
+                            if((long)dVal2 == 0)
                                 throw new JIPEvaluationException(JIPEvaluationException.zero_divisor);
 
                             dblVal = (Math.abs(dVal1) % dVal2) * Math.signum(dVal2);
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -652,12 +663,12 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            if((int)dVal2 == 0)
+                            if((long)dVal2 == 0)
                                 throw new JIPEvaluationException(JIPEvaluationException.zero_divisor);
 
                             dblVal = dVal1 % dVal2;
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -679,9 +690,9 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            dblVal =  (int)dVal1 & (int)dVal2;
+                            dblVal =  (long)dVal1 & (long)dVal2;
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -703,9 +714,9 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            dblVal =  (int)dVal1 | (int)dVal2;
+                            dblVal =  (long)dVal1 | (long)dVal2;
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -727,9 +738,9 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            dblVal =  (int)dVal1 << (int)dVal2;
+                            dblVal =  (long)dVal1 << (long)dVal2;
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -748,9 +759,9 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            dblVal =  (int)dVal1 ^ (int)dVal2;
+                            dblVal =  (long)dVal1 ^ (long)dVal2;
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -772,9 +783,9 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp2.isInteger())
                                 throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
 
-                            dblVal =  (int)dVal1 >> (int)dVal2;
+                            dblVal =  (long)dVal1 >> (long)dVal2;
 
-                            if(dblVal > Integer.MAX_VALUE || dblVal < Integer.MIN_VALUE)
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
                                 throw new JIPEvaluationException("int_overflow");
 
                             return Expression.createNumber(dblVal);
@@ -790,8 +801,26 @@ final class Expression extends PrologObject //implements Serializable
                             final Expression exp2 = Expression.compute(((ConsCell)params.getTail()).getHead());
                             final double dVal2 = exp2.m_dValue;
 
-                            dblVal =  (int)(dVal1 - dVal1 % dVal2) / dVal2;
-                            return Expression.createInteger((int)dblVal);
+                            if(!exp1.isInteger())
+                                throw new JIPTypeException(JIPTypeException.INTEGER, exp1);
+
+                            if(!exp2.isInteger())
+                                throw new JIPTypeException(JIPTypeException.INTEGER, exp2);
+
+                            if((long)dVal2 == 0)
+                                throw new JIPEvaluationException(JIPEvaluationException.zero_divisor);
+
+                            // ISO 9.1.3: div arrotonda verso il basso, non
+                            // verso lo zero come //. La vecchia formula
+                            // (int)(dVal1 - dVal1 % dVal2) / dVal2 troncava,
+                            // quindi -7 div 2 dava -3 invece di -4; e senza il
+                            // controllo qui sopra "1 div 0" tornava 0.
+                            dblVal =  Math.floor(dVal1 / dVal2);
+
+                            if(dblVal > MAX_INTEGER || dblVal < MIN_INTEGER)
+                                throw new JIPEvaluationException("int_overflow");
+
+                            return Expression.createNumber(dblVal);
                         }
                         else
                         {

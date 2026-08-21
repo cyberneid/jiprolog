@@ -133,7 +133,8 @@ Everything derives from `PrologObject` (abstract, `Serializable`):
 
 - `Atom` — interned in a **static, JVM-global** `Atom.s_atomTable`
 - `Expression` — **all** numbers, integer and float alike, stored as a single
-  `double` plus a `boolean floating` flag. There is no `long` and no BigInteger.
+  `double` plus a `boolean floating` flag. No BigInteger, so integers are exact
+  only to ±(2^53−1) and overflow past it.
 - `Variable` — mutable binding cell; `lastVariable()` walks the binding chain,
   `clear()` undoes a binding on backtracking
 - `ConsCell` → `List` (Prolog lists), `Functor` (compound terms), `Clause`
@@ -252,9 +253,11 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
 - `.jip`, `lib/` and `target/` are gitignored — never commit build output.
 - `PrettyPrinter` output is not a reliable view of term structure; use
   `write_canonical/1` or `=../2` when debugging the parser.
-- Integers overflow at ±2^31 with `evaluation_error(int_overflow)` — `20!`
-  fails. This is by design of the `double`-backed `Expression`, not a bug you
-  should "fix" locally.
+- Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
+  past it with `evaluation_error(int_overflow)`. That is the limit of the
+  `double` the value is held in, so it is a real boundary, not an arbitrary
+  one: `18!` works, `20!` does not. If you add an arithmetic branch, bound-check
+  against those constants and do integer work in `long`, never `int`.
 - `WAM.run` catches `Throwable` and calls `printStackTrace()`; a
   `StackOverflowError` from deep term recursion floods stderr with tens of
   thousands of frames before the real error surfaces.

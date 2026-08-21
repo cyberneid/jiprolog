@@ -378,10 +378,11 @@ final class PrettyPrinter extends Object
     private static final void printExpression(final PrologObject obj, final boolean bQ, StringBuilder sb)
     {
         final double dVal = ((Expression)obj).getValue();
-        final int nVal = (int)dVal;
 
+        // long e non int: gli interi arrivano fino a 2^53 (Expression.MAX_INTEGER)
+        // e un cast a int li stamperebbe saturati a 2147483647
         if(((Expression)obj).isInteger())
-            sb.append(Integer.toString(nVal));
+            sb.append(Long.toString((long)dVal));
         else
         	sb.append(Double.toString(dVal));
     }

@@ -96,13 +96,83 @@ public class BuiltInsTest extends PrologTestBase
         }
 
         @Test
-        @DisplayName("integers are bounded at 2^31 - see CODE_REVIEW.md section 9")
+        @DisplayName("integers are exact up to 2^53, and overflow past it")
         public void integersAreBounded()
         {
             assertTrue(succeeds("current_prolog_flag(bounded, true)"),
                     "the arithmetic is bounded, the flag must say so");
-            assertTrue(String.valueOf(valueOf("catch(_ is 2147483647 + 1, E, true)", "E"))
+
+            // every number is held in a double, so 2^53 - 1 is the largest
+            // integer that is still exact
+            assertEquals("9007199254740991", valueOf("current_prolog_flag(max_integer, X)", "X"));
+            assertEquals("-9007199254740991", valueOf("current_prolog_flag(min_integer, X)", "X"));
+
+            assertEquals("9007199254740991", valueOf("X is 9007199254740991 + 0", "X"));
+            assertEquals("6227020800", valueOf("X is 13 * 479001600", "X"));
+
+            assertTrue(String.valueOf(valueOf("catch(_ is 9007199254740991 + 1, E, true)", "E"))
                     .startsWith("error(evaluation_error(int_overflow)"));
+            assertTrue(String.valueOf(valueOf("catch(_ is -9007199254740991 - 1, E, true)", "E"))
+                    .startsWith("error(evaluation_error(int_overflow)"));
+        }
+
+        @Test
+        @DisplayName("**/2 is float exponentiation, ^/2 stays integral")
+        public void powerOperators()
+        {
+            assertEquals("1024.0", valueOf("X is 2 ** 10", "X"));
+            assertEquals("8.0", valueOf("X is 2.0 ** 3", "X"));
+            assertEquals("2.0", valueOf("X is 4 ** 0.5", "X"));
+
+            assertEquals("1024", valueOf("X is 2 ^ 10", "X"));
+            assertEquals("8.0", valueOf("X is 2.0 ^ 3", "X"));
+        }
+
+        @Test
+        @DisplayName("bit operations work across the whole integer range")
+        public void bitOperations()
+        {
+            // these used to be computed in 32-bit ints, so "1 << 40" shifted by
+            // 40 & 31 == 8 and quietly returned 256
+            assertEquals("1099511627776", valueOf("X is 1 << 40", "X"));
+            assertEquals("1", valueOf("X is (1 << 40) >> 40", "X"));
+            assertEquals("0", valueOf("X is 5000000000 /\\ 255", "X"));
+            assertEquals("-1", valueOf("X is \\ 0", "X"));
+        }
+
+        @Test
+        @DisplayName("div rounds toward negative infinity, // toward zero")
+        public void divIsFloorDivision()
+        {
+            assertEquals("3", valueOf("X is 7 div 2", "X"));
+            assertEquals("-4", valueOf("X is -7 div 2", "X"));
+            assertEquals("-4", valueOf("X is 7 div (-2)", "X"));
+
+            assertEquals("3", valueOf("X is 7 // 2", "X"));
+            assertEquals("-3", valueOf("X is (-7) // 2", "X"));
+        }
+
+        @Test
+        @DisplayName("every integer division rejects a zero divisor")
+        public void zeroDivisors()
+        {
+            for (String goal : new String[] {"1 // 0", "1 mod 0", "1 rem 0", "1 div 0"})
+            {
+                assertTrue(String.valueOf(valueOf("catch(_ is " + goal + ", E, true)", "E"))
+                                .startsWith("error(evaluation_error(zero_divisor)"),
+                        goal + " must raise evaluation_error(zero_divisor)");
+            }
+        }
+
+        @Test
+        @DisplayName("float_integer_part and float_fractional_part are different functions")
+        public void floatParts()
+        {
+            // float_integer_part used to be a copy of float_fractional_part
+            assertEquals("3.0", valueOf("X is float_integer_part(3.7)", "X"));
+            assertEquals("-3.0", valueOf("X is float_integer_part(-3.7)", "X"));
+            assertEquals("3", valueOf("X is truncate(3.7)", "X"));
+            assertEquals("10000000000", valueOf("X is truncate(1.0e10)", "X"));
         }
     }
 

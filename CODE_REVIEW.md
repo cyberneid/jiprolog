@@ -35,11 +35,11 @@ layer and the API boundary are sound. The findings are localized defects and
 accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
-a working jar, and runs its tests on four JDK/OS combinations. §1, §4, §5 and
-the two resolved bullets of §12 are fixed, each with tests — 56 tests, of which
-2 are disabled. §2, §3 and the rest are open; `KnownDefectsTest` carries a
-disabled, already-written test for each remaining defect that can be expressed
-at the Prolog level.
+a working jar, and runs its tests on four JDK/OS combinations. §1, §4, §5, §9
+and the two resolved bullets of §12 are fixed, each with tests — 59 tests, none
+disabled. §2, §3 and the rest are open. Neither §2 nor §3 can be demonstrated
+from Prolog alone, which is why they have no test yet: both need a
+multi-engine or multi-threaded harness.
 
 ---
 
@@ -420,7 +420,11 @@ path** — after a successful `nextSolution` it still holds the previous value.
 
 ---
 
-## 9. Medium — all numbers are `double`, with a 32-bit integer range
+## 9. Medium — all numbers are `double`, ~~with a 32-bit integer range~~
+
+> **Fixed**, except for `/` on exact integer division (see the end of this
+> section). Investigating it turned up four further defects, three of them
+> silent wrong answers, recorded below.
 
 **`src/com/ugos/jiprolog/engine/Expression.java`**
 
@@ -431,39 +435,73 @@ private boolean floating = false;
 floating = (int)dNum != dNum;     // 32-bit test on a 64-bit value
 ```
 
-Consequences:
+Numbers are all `double`s with a `floating` flag. A `double` holds every
+integer up to 2^53 exactly, but the bound checks were written against
+`Integer.MAX_VALUE`, so 22 bits of exact integers were thrown away:
+`X is 13 * 479001600` (13!) raised `evaluation_error(int_overflow)`, and
+integral values beyond ±2^31 were classified as *floats* by the
+`(int)dNum != dNum` test.
 
-- `X is 13 * 479001600` (i.e. `13!`) → `evaluation_error(int_overflow)`. `20!`
-  is unreachable. Roughly 20 sites guard on `Integer.MAX_VALUE`.
-- Integral values outside ±2^31 are classified as **floats** by the
-  `(int)dNum != dNum` test, even though a `double` holds every integer up to
-  2^53 exactly. So the representable-but-rejected band 2^31…2^53 is lost twice
-  over.
-- `Expression.createNumber(String)` decides float-ness with
-  `strNum.contains(".")`, so `1e10` and `1.0e10` classify differently.
+**Fixed** by introducing `Expression.MAX_INTEGER` / `MIN_INTEGER` at ±(2^53−1)
+and using them for all 44 bound checks, and by testing float-ness with `(long)`.
+2^53−1 rather than 2^53, because a true product of 2^53+1 rounds to 2^53 and
+must still be rejected. `IntegerBounds2` reads the same constants, so the
+`max_integer` / `min_integer` flags follow automatically, and
+`PrettyPrinter.printExpression` now formats through `long` — it was doing
+`Integer.toString((int)dVal)`, which would have printed every large integer
+saturated at 2147483647.
 
-ISO permits a bounded implementation (`flag(bounded, true)`), so this is
-conforming — but `max_integer` at 2^31 while the underlying storage is a
-`double` is an arbitrary limitation, not a representation limit.
+### Four further defects found while widening the range
 
-**Suggested direction:** split `Expression` into integer and float variants
-backed by `long` and `double` (and optionally `BigInteger` behind an unbounded
-flag). That is a real change, so at minimum: raise the bound to 2^53, fix
-`floating` to test `(long)dNum != dNum`, and make `createNumber(String)` decide
-float-ness from the token type rather than by searching for a `.`.
+The bound was masking these: the values that trigger them were unreachable.
 
-### Related conformance deviations found under test
-
-| Goal | JIProlog | ISO |
+| goal | was | now |
 |---|---|---|
-| `X is 2 ** 10` | `1024` (integer) | `1024.0` — `**` is float exponentiation |
-| `X is 10 / 5` | `2.0` | `2` when both args are integers and the division is exact |
-| `integer(- 7)` | `true` | `false` — `- 7` with layout is `-(7)` |
+| `X is 1 << 40` | **256** | 1099511627776 |
+| `X is truncate(1.0e10)` | **2147483647** | 10000000000 |
+| `X is float_integer_part(3.7)` | **0.7000000000000002** | 3.0 |
+| `X is -7 div 2` | **-3** | -4 |
+| `X is 1 div 0` | **0** | `evaluation_error(zero_divisor)` |
+
+- **The bit operations computed in 32-bit `int`.** `(int)dVal1 << (int)dVal2`
+  makes `1 << 40` a shift by `40 & 31` == 8, so it returned 256 — silently, no
+  overflow, just a wrong number. Twelve `(int)` casts across `//`, `mod`, `rem`,
+  `/\`, `\/`, `<<`, `>>`, `xor`, `\`, `truncate` and the float-part functions
+  are now `(long)`. This one mattered more than the bound itself: an overflow
+  raises an error, a truncated shift does not.
+- **`truncate` saturated.** `(int)1.0e10` is `Integer.MAX_VALUE`, so
+  `truncate(1.0e10)` returned 2147483647.
+- **`float_integer_part` was a copy of `float_fractional_part`** — literally the
+  same expression, `dVal1 - (int)dVal1`, two branches apart.
+- **`div/2` truncated instead of flooring, and did not check its divisor.** ISO
+  9.1.3 has `div` round toward negative infinity, unlike `//` which rounds
+  toward zero, so `-7 div 2` is -4. And with no zero check,
+  `(int)(dVal1 - dVal1 % 0) / 0` evaluated to `(int)NaN / 0.0`, which the
+  `Expression(int)` constructor accepted as 0 — `1 div 0` quietly returned 0
+  while `//`, `mod` and `rem` all raised `zero_divisor` correctly.
+
+`**/2` also now returns a float for integer arguments, per ISO 9.3.1;
+`^/2` stays integral. That was the last row of the conformance table below.
+
+### Still open
+
+| goal | JIProlog | ISO |
+|---|---|---|
+| `X is 10 / 5` | `2.0` | `2` when the division is exact |
 | error `context/2` | `context(error(type_error(atom,1)), file(undefined,0))` | `context(Name/Arity, Message)` |
 
-The error-context shape is a compatible extension in spirit, but it nests the
-whole error term inside its own context, which is redundant and will confuse
-portable code that pattern-matches on `context/2`.
+`/` is left alone deliberately: implementations genuinely differ on whether
+exact integer division yields an integer, and changing it would silently alter
+the value of existing programs for no conformance gain that the standard
+actually requires. The error-context shape is a compatible extension in spirit,
+but it nests the whole error term inside its own context, which is redundant and
+will confuse portable code that matches on `context/2`.
+
+**Not attempted:** splitting `Expression` into `long`-backed integer and
+`double`-backed float variants, or adding a `BigInteger` path behind an
+unbounded flag. That is the real fix for a Prolog that wants unbounded
+integers; what is here makes the bounded implementation honest and exact
+within its bounds.
 
 ---
 

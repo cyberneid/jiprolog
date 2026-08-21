@@ -25,7 +25,8 @@ final class IntegerBounds2 extends BuiltIn
 {
     public final boolean unify(final Hashtable<Variable, Variable> varsTbl)
     {
-        return getParam(1).unify(Expression.createNumber(Integer.MIN_VALUE), varsTbl) &&
-        	   getParam(2).unify(Expression.createNumber(Integer.MAX_VALUE), varsTbl);
+        // alimenta i flag min_integer/max_integer via flags.pl
+        return getParam(1).unify(Expression.createNumber(Expression.MIN_INTEGER), varsTbl) &&
+        	   getParam(2).unify(Expression.createNumber(Expression.MAX_INTEGER), varsTbl);
     }
 }
