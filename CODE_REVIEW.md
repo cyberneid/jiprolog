@@ -38,10 +38,10 @@ accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
 a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
-§9 and the two resolved bullets of §12 are fixed; §3 is fixed apart from the
-built-in table. 67 tests, none disabled. What remains is §10 (performance),
-§11 (error handling and resource management), §13 (maintainability), and the
-ISO conformance suite.
+§9, §10 and the two resolved bullets of §12 are fixed; §3 is fixed apart from
+the built-in table. 68 tests and a 262-case ISO conformance suite, none
+disabled. What remains is §11 (error handling and resource management) and §13
+(maintainability), plus the deeper items §10 lists as still open.
 
 ---
 
@@ -577,30 +577,117 @@ within its bounds.
 
 ## 10. Medium — hot-path performance
 
-Measured: **~89 KLIPS** on nrev30 × 2000 (JDK 21, this tree). That is roughly
-two orders of magnitude below mainstream Prolog systems. Three specific causes,
-in rough order of cost:
+> **Largely fixed — 15x on the benchmark set — and this section's original
+> diagnosis was wrong on all three counts.** What follows is the measurement.
 
-1. **`WAM.run` allocates a `Hashtable(13)` per resolution step**
-   (`WAM.java:403`), plus `PrologObject.unify` allocates a *second*
-   `Hashtable(10)` per unification attempt and then copies the survivors into
-   the first (`PrologObject.java:77-105`). Two hash tables per attempted clause
-   match, including for clauses that fail to unify.
-2. **Every built-in call allocates a new instance via reflection.**
-   `BuiltInFactory.getInstance` (`BuiltInFactory.java:199-227`) calls
-   `Class.newInstance()` per goal — deprecated since Java 9, and it launders
-   checked exceptions from the constructor. Stateless built-ins (the majority)
-   could be singletons; stateful ones could implement a cheap `newInstance()`
-   override that just calls `new`.
-3. **`Expression.compute` is a ~120-branch `if/else` chain of `String.equals`**
-   (`Expression.java:113-760`), walked on every arithmetic evaluation, with the
-   common operators not at the front. A `switch` on the functor name (Java 7+)
-   or a `Map<String, Evaluable>` would be both faster and far more readable —
-   the method is currently ~650 lines.
+The original text blamed the two `Hashtable`s per unification attempt,
+`Class.newInstance` per built-in call, and the `if/else` chain in
+`Expression.compute`. A JFR profile of `bench/` says otherwise:
 
-Note `Variable.timestamp()` and `rootVariable()` walk the parent chain on every
-call, and `timestamp()` is used by `lessThen`/`termEquals` — i.e. inside
-sorting. Worth caching.
+| self time | |
+|---|---|
+| `AbstractStringBuilder.ensureCapacityInternal` | **35%** |
+| `Hashtable.get` | **26%** |
+| `GlobalDB.search` | 17% |
+| `String.hashCode` | 10% |
+| `ConsCell.copy` | 3% |
+| `PrologObject.unify` | **1%** |
+
+Seventy per cent of the time went on building and hashing strings to look
+predicates up. Unification — the thing this section pointed at — was one per
+cent. `Class.newInstance` and `Expression.compute` do not appear in the profile
+at all, at any depth.
+
+### What was actually wrong
+
+**The clause table was keyed by a composed string.** `GlobalDB.search` runs once
+per inference and built `"modulo:nome/arieta"` with a `StringBuilder` each time,
+then hashed it from scratch. For a predicate that resolves in `$system` it did
+this three times, twice with the same key, because the module-stack loop and the
+explicit `$user` lookup below it both miss first. `m_moduleIndex` is the same
+content as a two-level map, so a lookup uses strings that already exist with
+their hash already cached, and allocates nothing.
+
+**The module stack never unwound, which made the interpreter quadratic.**
+`getRulesEnumeration` pushes the current module for every goal; the pushes made
+by nodes that backtracking abandoned were never undone. Measured on this
+benchmark set: **28129 entries at peak, 7674 on average at the moment
+`search` was called** — and `search` scans it. The cost of resolving a predicate
+grew with the number of inferences already run. Each `Node` now records the
+depth at which it generated its clauses and `backtrack` truncates to it.
+
+**A functor name was decomposed on every construction.** `Functor(Atom, ConsCell)`
+did `lastIndexOf`, two `substring`s and an `Integer.parseInt` — once per clause
+copy, so once per resolution step. Atoms are interned and immutable, so the
+split is cached there.
+
+### Results
+
+Best of three runs, whole set:
+
+| | before | after | |
+|---|---|---|---|
+| `atom_churn` | 10517 ms | 89 ms | **118x** |
+| `deriv` | 375 ms | 41 ms | 9.2x |
+| `findall` | 201 ms | 26 ms | 7.7x |
+| `db_churn` | 135 ms | 59 ms | 2.3x |
+| `nrev30` | 712 ms | 508 ms | 1.4x |
+| `fib20` | 81 ms | 64 ms | 1.3x |
+| **total** | **12021 ms** | **797 ms** | **15.1x** |
+
+The spread is the informative part. `nrev30` barely moves because its
+predicates live in `$user`, which is the bottom of the module stack and so the
+first entry tried — it was always hitting on the first iteration. `atom_churn`
+moves by two orders of magnitude because its predicates live in library
+modules, so every call scanned the whole leaked stack first.
+
+On nrev this is roughly 209 KLIPS to 287 KLIPS.
+
+### Tried and measured flat
+
+Recorded so the next person does not repeat them:
+
+- **Skipping repeated modules inside the stack scan.** Exactly
+  semantics-preserving, and completely flat: the scan's cost is its length, not
+  its body. Reverted.
+- **Replacing the temporary `Hashtable` in `PrologObject.unify` with a trail.**
+  About 3–6% on nrev, inside the noise on the rest. Kept, because it does
+  measure better on the benchmark it targets and removes a per-attempt
+  allocation, but it is not the win the original diagnosis expected.
+
+### What is left
+
+The nrev profile is now the structure-copying cost this section should have
+pointed at in the first place:
+
+| self time | |
+|---|---|
+| `ConsCell.copy` + `Variable.copy` | **54%** |
+| `Hashtable.addEntry` (the per-node binding table) | 18% |
+| `ConsCell._unify` | 11% |
+
+Two levers, in increasing order of ambition:
+
+1. **The per-node binding table.** `WAM.run` allocates a `Hashtable` per node
+   and `Node.clearVariables` iterates it. A trail would suit it as well as it
+   suited `unify`, but `Node.m_varTbl` is threaded through
+   `BuiltIn.unify(Hashtable)`, which about a hundred built-in classes override.
+   Mechanical, and the compiler catches every miss, but wide.
+
+2. **Not copying clauses at all.** `PrologRule.nextElement` copies the whole
+   clause on every resolution step. A real WAM binds into a shared structure
+   and undoes through a trail. That is the change that would move nrev by an
+   order of magnitude, and it is a rewrite of the resolution core rather than a
+   local fix.
+
+3. **The module stack still leaks on deterministic forward execution** — depth
+   fell from 28129 to 15958, not to zero. It is visible as position sensitivity:
+   `atom_churn` takes 118 ms run first and 795 ms run last in a conjunction.
+   Closing it means deciding what the module chain is supposed to mean, which is
+   a semantics question and needs module-resolution tests that do not exist.
+
+`bench/` holds the programs and the runner; `bench/README.md` explains why the
+numbers are order-dependent and why one run is not enough.
 
 ---
 

@@ -195,10 +195,15 @@ bound at that node (used to undo bindings on backtracking).
   rewriting `m_backtrack` links
 - `WAMTrace` extends `WAM` to emit `JIPTraceEvent`s for the debugger
 
-`Clause`/`PrologRule` unification allocates a fresh `Hashtable` per resolution
-step. This is the main reason throughput is ~90 KLIPS on nrev (roughly two
-orders of magnitude below SWI-Prolog). Treat that as a known characteristic, not
-something a local change will fix.
+`PrologRule.nextElement` copies the whole clause on every resolution step, and
+`WAM.run` allocates a `Hashtable` per node for the bindings. Together they are
+about 70% of the nrev profile and the reason throughput is ~287 KLIPS, still
+well below SWI-Prolog. Removing them means binding into shared structure with a
+trail instead of copying — a rewrite of the resolution core, not a local change.
+
+`bench/` holds the benchmark set. Measure before optimizing here: the profile
+has already contradicted the obvious guess twice, and `CODE_REVIEW.md` §10
+records what was tried and measured flat.
 
 ### Database (`GlobalDB.java`)
 
