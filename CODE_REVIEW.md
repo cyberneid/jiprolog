@@ -690,9 +690,9 @@ sorting. Worth caching.
 This is the finding with the highest leverage, because it is what would have
 caught §1, §4 and §5.
 
-- **No test suite.** Not one automated test in 251 files. For a language
-  implementation, where the contract is a published standard with a public
-  conformance suite, this is the gap that matters most.
+- ~~**No test suite.** Not one automated test in 251 files.~~ **Fixed:** 68
+  JUnit tests, one of which runs a 262-case ISO conformance suite. See the note
+  at the end of this section.
 - **`build.xml` does not work from a clean clone.** It references a sibling
   `../jipgui` project, a `../deploy` tree, and
   `C:\Program Files\proguard5.3.3\lib\proguard.jar`.
@@ -702,18 +702,41 @@ caught §1, §4 and §5.
   (`iconv`) and set `-encoding UTF-8`.
 - **No CI.** No `.github/workflows`.
 
-### Suggested order of work
+### The conformance suite
 
-1. Add a Maven or Gradle build with `encoding` set, and a GitHub Actions
-   workflow that compiles on JDK 8/17/21.
-2. Add JUnit and wire up the **Prolog ISO conformance suite** (Ulrich
-   Neumerkel's `vanilla` / the `inriasuite` tests are the standard choice, and
-   they run as plain Prolog). Record the current pass rate as a baseline —
-   that alone is a valuable artifact for a project claiming "a high degree of
-   compliance".
-3. Add regression tests for §1's exact goals, then fix §1.
-4. Fix §4 and §5 (both are small and self-contained).
-5. Work through §2 and §3 with the test suite as a safety net.
+`test/resources/iso/` holds 262 cases across ISO sections 7.8 (control
+constructs), 8.2–8.5 (unification, type testing, comparison, term
+construction), 8.6–8.7 and 9 (arithmetic), 8.8–8.10 (clause database and all
+solutions), 8.15 (negation) and 8.16 (atomic term processing).
+`IsoConformanceTest` runs them and fails on any unexpected result. All 262 pass.
+
+The cases are written from the standard rather than taken from an existing
+suite. That was a deliberate choice — vendoring a third-party test corpus of
+unclear licensing into an AGPL tree is a decision for the project owner, not a
+side effect of adding tests — but it is also the caveat on the number. **A suite
+and an implementation checked against each other by the same hand is a weaker
+signal than an independent one.** Running the real `inriasuite` remains worth
+doing, and would very likely come back redder.
+
+It has earned its keep even so. Two defects fell out of writing it:
+
+| goal | was | now |
+|---|---|---|
+| `X is sign(0)` | **-1** | 0 |
+| `[a] =.. L` | **`[[a]]`** | `['.',a,[]]` |
+
+- **`sign/1` had no zero case** — `if(dVal1 > 0) 1 else -1`, so `sign(0)` and
+  `sign(0.0)` both returned -1. It also now preserves float-ness, per ISO 9.1.7.
+- **`=../2` treated a list as atomic**, while `functor/3` already reported `'.'`
+  and arity 2 for the same term. The two built-ins contradicted each other, and
+  `X =.. L, Y =.. L` did not round-trip for any list. Both directions of `=..`
+  now agree with `functor/3`.
+
+### What is left in this section
+
+Nothing, other than keeping the suite growing. Sections not yet covered:
+8.11–8.14 (stream and term I/O), 8.17 (implementation-defined hooks), and the
+flags in 7.11.
 
 ---
 

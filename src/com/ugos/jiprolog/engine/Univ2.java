@@ -89,7 +89,17 @@ final class Univ2 extends BuiltIn
 //                          System.out.println("funparams " + funparms);
                             final String strName = ((Atom)head).getName() + "/" + Integer.toString(nArity);
                             final Atom name = Atom.createAtom(strName);
-                            if(BuiltInFactory.isBuiltIn(strName))
+                            if(nArity == 2 && ((Atom)head).getName().equals("."))
+                            {
+                                // '.'/2 costruisce una lista, non un Functor,
+                                // come fa gia' functor(T, '.', 2). Senza questo
+                                // "X =.. ['.',a,[]]" dava il composto '.'(a,[]),
+                                // che non e' ==/2 a [a]: il round-trip
+                                // X =.. L, Y =.. L non tornava.
+                                PrologObject tail = ((ConsCell)funparms.getTail()).getHead();
+                                list = new List(funparms.getHead(), tail);
+                            }
+                            else if(BuiltInFactory.isBuiltIn(strName))
                                 list = new BuiltInPredicate(name, funparms);
                             else if(name.equals(Atom.COMMA))
                             	list = funparms;
@@ -124,6 +134,22 @@ final class Univ2 extends BuiltIn
                 term = new List(Atom.createAtom(((Functor)func).getFriendlyName()), new List(((Functor)func).getParams()));
             else if(func instanceof ConsCell && !(func instanceof List))
                 term = new List(Atom.createAtom(","), new List((ConsCell)func));
+            else if(func instanceof List && !func.unifiable(List.NIL))
+            {
+                // Una lista non vuota e' il composto '.'(Testa, Coda), come
+                // gia' dice functor/3 (che su [a] risponde '.'/2). Qui cadeva
+                // nel ramo atomico qui sotto, e "[a] =.. L" dava L = [[a]]:
+                // =../2 e functor/3 si contraddicevano.
+                final ConsCell cell = (ConsCell)func;
+
+                // la coda dell'ultima cella e' null internamente, non List.NIL
+                PrologObject tail = cell.getTail();
+                if(tail == null)
+                    tail = List.NIL;
+
+                term = new List(Atom.createAtom("."),
+                        new List(cell.getHead(), new List(tail, null)));
+            }
             else
                 term = new List(func, null);
 

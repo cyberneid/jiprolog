@@ -367,10 +367,18 @@ final class Expression extends PrologObject //implements Serializable
                             if(!exp1.floating && (dVal1 > MAX_INTEGER || dVal1 < MIN_INTEGER))
                                 throw new JIPEvaluationException("int_overflow");
 
+                            // NB: mancava il caso zero, quindi sign(0) tornava
+                            // -1. ISO 9.1.7: il segno di un intero e' intero,
+                            // quello di un float e' float.
                             if(dVal1 > 0)
                                 dblVal = 1;
-                            else
+                            else if(dVal1 < 0)
                                 dblVal = -1;
+                            else
+                                dblVal = 0;
+
+                            if(exp1.floating)
+                                return Expression.createDouble(dblVal);
 
                             return Expression.createNumber(dblVal);
                         }

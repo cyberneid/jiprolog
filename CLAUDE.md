@@ -91,10 +91,13 @@ if you care to keep it accurate.
   x.pl library set is present. This is what fails first if the bootstrap broke.
 - `BuiltInsTest` — the passing baseline: arithmetic, terms, control constructs,
   the database, lists.
-- `KnownDefectsTest` — one test per open defect in `CODE_REVIEW.md`, each
-  asserting the **correct** behaviour and marked `@Disabled`. Fixing a defect
-  means deleting its `@Disabled`. Never make one of these pass by editing the
-  expected value to match what the engine currently does.
+- `ParserTest` — operator precedence and associativity, asserted through
+  `write_canonical/1`. This is the regression net for `PrologParser`.
+- `ConcurrencyTest` — four threads, one engine each. This is the harness for the
+  shared-static work; every one of its tests fails against the pre-fix sources.
+- `DcgTest`, `ListenerApiTest`, `ReflectionHandleTest` — the areas fixed in
+  `CODE_REVIEW.md` §2, §4/§12 and §5.
+- `IsoConformanceTest` — runs the 262-case suite in `test/resources/iso/`.
 
 Tests run against the **release** kernel (no `JIPDebugger.debug`), so the suite
 also proves the bootstrap produced a loadable kernel. Surefire uses
@@ -102,9 +105,36 @@ also proves the bootstrap produced a loadable kernel. Surefire uses
 statics (`CODE_REVIEW.md` §3) and results would otherwise depend on class
 ordering. Drop that setting once the statics are gone.
 
-Coverage is thin and deliberately so: it pins current behaviour so the parser
-and engine work in `CODE_REVIEW.md` has something to fall back on. The next
-step is wiring up a real ISO conformance suite.
+### The ISO conformance suite
+
+`test/resources/iso/` is a suite written from ISO/IEC 13211-1, in a small
+data format the runner interprets:
+
+```prolog
+iso(Section, Goal, success).            % has at least one solution
+iso(Section, Goal, failure).            % has none
+iso(Section, Goal, error(Formal)).      % throws error(Formal, _)
+iso(Section, Goal, ball(Term)).         % throws Term, not necessarily an error/2
+```
+
+Value checks go **inside** the goal with `==/2`, so the harness never has to
+match variable names:
+
+```prolog
+iso('9.1.3', (X is 7 // 2, X == 3), success).
+```
+
+To add cases, drop them in the matching `cases_*.pl` (each needs
+`:- multifile(iso/3).`) or add a file and list it in `IsoConformanceTest.SUITE`.
+
+The suite is expected to be entirely green. A case that starts failing is
+either a regression or a real deviation — the latter belongs in
+`CODE_REVIEW.md` with the case annotated, not quietly deleted.
+
+Caveat worth keeping in mind: these cases were written against this
+implementation by the same hand, so 262/262 is a weaker signal than an
+independent suite would give. Running the real `inriasuite` is still worth
+doing.
 
 ## Architecture
 
