@@ -37,9 +37,6 @@ class Clause extends ConsCell
 //    private int     m_nPosition = 0;
 //    private int     m_nLineNumber = 0;
 
-    private static JIPEngine s_engine = null;
-    private static Functor s_translateQuery = null;
-    private static ConsCell s_translateParams = null;
 
     Clause(String strModuleName, final Functor lhs, final ConsCell rhs)
     {
@@ -114,12 +111,15 @@ class Clause extends ConsCell
         return clause;
     }
 
-    static final Clause getClause(PrologObject pred, boolean enableClauseChecks)
+    static final Clause getClause(PrologObject pred, boolean enableClauseChecks, JIPEngine engine)
     {
-        return getClause(pred, GlobalDB.USER_MODULE, enableClauseChecks);
+        return getClause(pred, GlobalDB.USER_MODULE, enableClauseChecks, engine);
     }
 
-    static final Clause getClause(PrologObject pred, String strModuleName, boolean enableClauseChecks)
+    // engine serve solo alla traduzione delle DCG, che gira sull'interprete:
+    // va passato dal chiamante e non preso da una static, altrimenti la regola
+    // finisce tradotta contro il database di un'altra JIPEngine.
+    static final Clause getClause(PrologObject pred, String strModuleName, boolean enableClauseChecks, JIPEngine engine)
     {
         if(pred instanceof Variable)
             pred = ((Variable)pred).getObject();
@@ -173,31 +173,31 @@ class Clause extends ConsCell
         else if(func.getAtom().equals(Atom.DCG))
         {
             PrologObject translated;
-            // chiama il prolog per la translation
-            if(s_engine == null)
-                s_engine = JIPEngine.getDefaultEngine();
 
-            if(s_translateQuery == null)
-            {
-                final PrologParser parser = new PrologParser(new ParserReader(new PushbackLineNumberInputStream(new StringReader("translate(X, Y)"))), new OperatorManager(),null,"internal");
-                try
-                {
-                    final Functor funct = ((Functor)parser.parseNext());
-                    s_translateParams = funct.getParams();
-                    s_translateQuery = new Functor(Atom.COLON, new ConsCell(Atom.KERNEL, new ConsCell(funct, null)));
-                }
-                catch(JIPSyntaxErrorException ex)
-                {
-                    throw new JIPRuntimeException(ex.toString());
-                }
-            }
-            Variable vTranslated = new Variable("Y");
-            s_translateParams.setHead(func);
-            ((ConsCell)s_translateParams.getTail()).setHead(vTranslated);
+            // chiama il prolog per la translation.
+            //
+            // NB: qui c'erano tre static - s_engine, s_translateQuery e
+            // s_translateParams. s_engine restava agganciata alla prima
+            // JIPEngine costruita nella JVM, quindi con piu' engine la regola
+            // veniva tradotta contro il database sbagliato; e la query era un
+            // termine condiviso mutato in place a ogni traduzione
+            // (s_translateParams.setHead), quindi due thread che consultavano
+            // DCG in parallelo si sovrascrivevano gli argomenti a vicenda.
+            // Ora e' tutto locale.
+            if(engine == null)
+                throw new JIPRuntimeException("DCG translation requires an engine");
 
-            WAM wam = new WAM(s_engine);
+            final Variable vTranslated = new Variable("Y");
 
-            if(wam.query(new ConsCell(s_translateQuery, null)))
+            // translate(Func, Y), qualificato nel modulo $kernel
+            final Functor translate = new Functor(Atom.createAtom("translate/2"),
+                    new ConsCell(func, new ConsCell(vTranslated, null)));
+            final Functor translateQuery = new Functor(Atom.COLON,
+                    new ConsCell(Atom.KERNEL, new ConsCell(translate, null)));
+
+            final WAM wam = new WAM(engine);
+
+            if(wam.query(new ConsCell(translateQuery, null)))
             {
                 wam.closeQuery();
 
@@ -205,7 +205,7 @@ class Clause extends ConsCell
                 translated = BuiltIn.getRealTerm(vTranslated);
 
                 // chiama getClause e ritorna
-                clause = getClause(translated.copy(false), strModuleName, false);
+                clause = getClause(translated.copy(false), strModuleName, false, engine);
 
                 wam.closeQuery();
 

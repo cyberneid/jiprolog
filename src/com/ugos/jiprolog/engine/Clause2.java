@@ -37,7 +37,7 @@ final class Clause2 extends BuiltIn
         if(!(bd == null) && !(bd instanceof Functor) && !(bd instanceof Atom))
             throw new JIPTypeException(JIPTypeException.CALLABLE, body);
 
-        Clause clause = Clause.getClause(getRealTerm(head), false);
+        Clause clause = Clause.getClause(getRealTerm(head), false, getJIPEngine());
 
         head = clause.getHead();
 

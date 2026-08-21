@@ -50,7 +50,7 @@ final class PredicateProperties2 extends BuiltIn
         if(funct.getParams().getHead() == null)
         	return false;
 
-        Clause clause = Clause.getClause(funct.getParams().getHead(), false);
+        Clause clause = Clause.getClause(funct.getParams().getHead(), false, getJIPEngine());
         String strFunc = new StringBuilder(clause.getHead().toString(getJIPEngine())).append('/').append(((ConsCell)funct.getParams().getTail()).getHead().toString(getJIPEngine())).toString();
 
         List propsList = null;

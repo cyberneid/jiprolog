@@ -84,8 +84,6 @@ public class JIPEngine implements Serializable
     private String          m_strSearchPath;
     private GlobalDB        m_globalDB;
 
-    private static JIPEngine defaultEngine;
-
     /** Returns the JIProlog version
      */
     public static final String getVersion()
@@ -114,11 +112,6 @@ public class JIPEngine implements Serializable
         return "JIProlog is released under AGPL v3 or under Commercial License. Visit http://www.jiprolog.com for more info";
     }
 
-    static JIPEngine getDefaultEngine()
-    {
-    	return defaultEngine;
-    }
-
     /** Constructs a new instance of JIPEngine with default values search path, input and output stream.
      * Search path is the path where this instance of JIPEngine searches for files.
      * The default value is the value of the environment variable user.dir<br>
@@ -127,11 +120,19 @@ public class JIPEngine implements Serializable
      */
     public JIPEngine()
     {
-    	if(defaultEngine == null)
-    	{
-    		defaultEngine = this;
-            s_globalDB = new GlobalDB(this);
-    	}
+        // Il kernel viene caricato una volta sola e poi clonato da ogni
+        // engine (GlobalDB.newInstance). Il synchronized serve perche' due
+        // thread che costruiscono una JIPEngine insieme lo caricherebbero due
+        // volte, e il secondo sovrascriverebbe lo snapshot del primo.
+        //
+        // NB: qui c'era anche "defaultEngine = this", che teneva in vita la
+        // prima JIPEngine della JVM per sempre e la offriva come fallback a
+        // Clause per la traduzione delle DCG. Ora l'engine si passa.
+        synchronized(JIPEngine.class)
+        {
+            if(s_globalDB == null)
+                s_globalDB = new GlobalDB(this);
+        }
 
         m_bTrace         = false;
 
@@ -810,7 +811,7 @@ public class JIPEngine implements Serializable
     {
         synchronized(m_globalDB)
         {
-            m_globalDB.asserta(Clause.getClause(term.getTerm(), getEnvVariable("enable_clause_check").equals("true")), null, true);
+            m_globalDB.asserta(Clause.getClause(term.getTerm(), getEnvVariable("enable_clause_check").equals("true"), this), null, true);
         }
     }
 
@@ -823,7 +824,7 @@ public class JIPEngine implements Serializable
     {
         synchronized(m_globalDB)
         {
-            final Clause clause = Clause.getClause(term.getTerm(), getEnvVariable("enable_clause_check").equals("true"));
+            final Clause clause = Clause.getClause(term.getTerm(), getEnvVariable("enable_clause_check").equals("true"), this);
             final Clause retractedClause = m_globalDB.retract(clause);
 
             if(retractedClause == null)
@@ -843,7 +844,7 @@ public class JIPEngine implements Serializable
     {
         synchronized(m_globalDB)
         {
-            m_globalDB.assertz(Clause.getClause(term.getTerm(),getEnvVariable("enable_clause_check").equals("true")), null, true);
+            m_globalDB.assertz(Clause.getClause(term.getTerm(), getEnvVariable("enable_clause_check").equals("true"), this), null, true);
         }
     }
 

@@ -24,22 +24,24 @@ The problems are concentrated in three places:
    causes, neither where this review first looked: prefix `-` was declared
    `500 fx` instead of ISO's `200 fy`, and the negative-literal fold ignored
    layout.
-2. **Shared mutable static state** makes multiple `JIPEngine` instances
+2. ~~**Shared mutable static state** makes multiple `JIPEngine` instances
    non-isolated and the library not thread-safe — including DCG translation,
-   which runs against a statically pinned engine using static scratch terms.
-3. **No tests, no working build.** `build.xml` cannot run from a clean clone and
-   there is not a single automated test, so none of the above was caught.
+   which runs against a statically pinned engine using static scratch terms.~~
+   **Mostly fixed**, and `ConcurrencyTest` now demonstrates it: all five of its
+   tests fail on the pre-fix code.
+3. ~~**No tests, no working build.**~~ **Fixed.** Maven, CI on four JDK/OS
+   combinations, 67 tests.
 
 Nothing here suggests the design is wrong. The resolution engine, the database
 layer and the API boundary are sound. The findings are localized defects and
 accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
-a working jar, and runs its tests on four JDK/OS combinations. §1, §4, §5, §9
-and the two resolved bullets of §12 are fixed, each with tests — 59 tests, none
-disabled. §2, §3 and the rest are open. Neither §2 nor §3 can be demonstrated
-from Prolog alone, which is why they have no test yet: both need a
-multi-engine or multi-threaded harness.
+a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
+§9 and the two resolved bullets of §12 are fixed; §3 is fixed apart from the
+built-in table. 67 tests, none disabled. What remains is §10 (performance),
+§11 (error handling and resource management), §13 (maintainability), and the
+ISO conformance suite.
 
 ---
 
@@ -156,6 +158,9 @@ programs. It now at least respects layout, like `-`.
 
 ## 2. Critical — DCG translation is pinned to a static engine and uses static scratch terms
 
+> **Fixed.** The engine is now passed down through `Clause.getClause` and the
+> translation query is built locally. `ConcurrencyTest` and `DcgTest` cover it.
+
 **`src/com/ugos/jiprolog/engine/Clause.java:40-42, 176-198`**
 
 ```java
@@ -184,14 +189,32 @@ Two independent defects:
   concurrently overwrite each other's arguments mid-flight, producing silently
   wrong translations.
 
-**Fix:** make the translation query a local, and take the `JIPEngine` from the
-clause's own context rather than a static. `getClause` is already called from
-paths that know the engine (`GlobalDB`, `Consult1`, `Load1`) — thread it through
-instead of reaching for a global.
+**Fixed** by adding a `JIPEngine` parameter to both `getClause` overloads and
+threading it through all ten call sites, every one of which already had an
+engine to hand. The translation query is built directly rather than by parsing
+`"translate(X, Y)"` and caching the result in a static, so nothing is shared
+and nothing is mutated in place.
+
+Three call sites in `JIPClause` — the public `create` entry points — have no
+engine, and pass `null`. A `-->/2` term reaching those now raises rather than
+being translated against an arbitrary engine; the internal callers all build a
+plain head with no body and never take that branch.
+
+`JIPEngine.defaultEngine` and `getDefaultEngine()` are gone with it: this was
+their only caller, and the field kept the first engine ever constructed alive
+for the life of the JVM.
+
+Under the old code, `ConcurrencyTest.dcgTranslationIsThreadSafe` fails with
+`NullPointerException: "translated" is null` — one thread's translation result
+read after another thread had already overwritten the shared query term.
 
 ---
 
 ## 3. High — shared mutable statics break engine isolation and thread safety
+
+> **Mostly fixed.** Every row of the table below is addressed except the
+> built-in table, which is discussed at the end. `ConcurrencyTest` is the
+> harness this section needed; all five of its tests fail on the pre-fix code.
 
 `JIPEngine` is documented as an instantiable engine, and new predicates *are*
 correctly isolated (verified: `assertz` into engine 1 is invisible to engine 2,
@@ -241,11 +264,58 @@ predicates are protected by the static-procedure check — but any dynamic
 predicate that exists in the shared snapshot is a live cross-engine channel.
 Deep-copy the databases, or make the sharing explicit and documented.
 
-**Recommendation:** treat "no new mutable statics" as a rule, then work the
-table above down. `Atom.s_atomTable` → `ConcurrentHashMap` with
-`computeIfAbsent`; `Variable.counter` → `AtomicLong`; the `StringBuilderEx`
-buffers → locals; `defaultEngine`/`s_globalDB` init → synchronized or a static
-holder.
+### What was done
+
+- **The `StringBuilderEx` buffers are gone.** `GlobalDB` now composes its keys
+  from three `String` constants. This was the worst of them, and the failure it
+  produces is vivid: under load a thread reads the buffer while another has
+  reallocated its `char[]`, and the engine dies during startup with
+  `Range [0, 0 + 48) out of bounds for length 37` while loading `flags.jip`.
+  `Variable`'s two name buffers went the same way.
+- **`Variable.counter` is an `AtomicLong`.** It drives both variable names and
+  the standard order of terms, so a lost increment is not cosmetic.
+- **`Atom.s_atomTable` is a `ConcurrentHashMap`,** and `createAtom` uses
+  `get` then `putIfAbsent` instead of `containsKey` then `put`. Interning the
+  same name twice used to be possible, which would make `==/2` report two
+  identical atoms as different terms.
+- **`JIPEngine.s_globalDB` is initialized under a lock.** Two threads
+  constructing engines at once each loaded a kernel, and the second overwrote
+  the first's snapshot — the other engine's `newInstance` then hit
+  `s_globalDB is null`.
+- **`Clause`'s statics are gone** — see §2.
+- **`JIPxReflect`'s handle table** is synchronized — see §5.
+- **Stream handles.** Found while doing the above: `InputStreamInfo` and
+  `OutputStreamInfo` numbered streams with a plain `static int refCounter`
+  incremented by 2, so two streams opened concurrently could share a handle.
+  Both are `AtomicInteger` now. A dead `sbMODE` buffer went with them.
+
+### Found while removing the buffers
+
+One of the twenty-odd call sites was
+
+```java
+m_clauseTable.get(sbSYSTEM_MODULE.resetToInitialValue().append(funct.getName()));
+```
+
+with no `.toString()` — a `StringBuilderEx` passed as a `Hashtable` key. It does
+not override `equals`, so that lookup could never match: the fallback search in
+`$system` from `search(Functor, String)` was dead code. It now composes a
+`String` and works. That is a behaviour change, and the one place in this
+section where something starts happening rather than stops.
+
+### Still open
+
+`BuiltInFactory.m_builtInTable` is static, and `addExternalPredicate` is a
+static mutating method, so `extern/3` in one engine still registers the
+predicate in every engine in the JVM. Reads of the table are safe — it is fully
+populated in a static initializer and only `extern/3` writes to it — so this is
+an isolation problem rather than a memory-model one, and fixing it means giving
+each engine its own overlay of external predicates. Left for its own change.
+
+`GlobalDB.newInstance` still shallow-clones, so `JIPClausesDatabase` values are
+shared between engines; the concrete databases synchronize their own methods,
+and new predicate names land in the cloned table, so what remains is the
+isolation question rather than a race.
 
 ---
 

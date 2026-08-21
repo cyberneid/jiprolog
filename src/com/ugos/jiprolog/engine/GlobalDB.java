@@ -46,10 +46,16 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     static final String USER_MODULE   = "$user";
     static final String KERNEL_MODULE = "$kernel";
 
-    public static final StringBuilderEx sbUSER_MODULE_AUX = new StringBuilderEx(USER_MODULE).append(":").setInitial();
-    public static final StringBuilderEx sbUSER_MODULE = new StringBuilderEx(USER_MODULE).append(":").setInitial();
-    public static final StringBuilderEx sbSYSTEM_MODULE = new StringBuilderEx(SYSTEM_MODULE).append(":").setInitial();
-    public static final StringBuilderEx sbKERNEL_MODULE = new StringBuilderEx(KERNEL_MODULE).append(":").setInitial();
+    // NB: qui c'erano quattro StringBuilderEx static, riusati con
+    // resetToInitialValue() per comporre le chiavi "modulo:nome/arieta" dei
+    // lookup nel database. Un solo char[] condiviso da tutta la JVM, senza
+    // alcuna sincronizzazione: due thread che risolvevano un predicato
+    // insieme si intrecciavano reset e append e producevano una chiave
+    // corrotta - cioe' un predicato non trovato, o peggio quello sbagliato.
+    // Il prefisso e' ora una costante e la chiave si compone sul posto.
+    static final String USER_MODULE_PREFIX   = USER_MODULE + ":";
+    static final String SYSTEM_MODULE_PREFIX = SYSTEM_MODULE + ":";
+    static final String KERNEL_MODULE_PREFIX = KERNEL_MODULE + ":";
 
 //    public static final StringBuilderEx defaultStringBuilder = new StringBuilderEx();
 
@@ -93,7 +99,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
     final boolean isMultifile(final String strPredName)
     {
-    	String def = sbUSER_MODULE.resetToInitialValue().append(strPredName).toString();
+    	String def = USER_MODULE_PREFIX + strPredName;
 
         if(m_clauseTable.containsKey(def))
         {
@@ -116,7 +122,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
         if(nPos < 0)
             throw new JIPTypeException(JIPTypeException.PREDICATE_INDICATOR, Functor.getPredicateIndicator(strPredName), jipEngine);
 
-    	final String def = sbUSER_MODULE.resetToInitialValue().append(strPredName).toString();
+    	final String def = USER_MODULE_PREFIX + strPredName;
         JIPClausesDatabase db;
         if(m_clauseTable.containsKey(def))
         {
@@ -152,9 +158,9 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
         m_moduleTransparentTbl.put(strPredName, strPredName);
 
-        JIPClausesDatabase db = (JIPClausesDatabase)m_clauseTable.get(sbUSER_MODULE.resetToInitialValue().append(strPredName).toString());
+        JIPClausesDatabase db = (JIPClausesDatabase)m_clauseTable.get(USER_MODULE_PREFIX + strPredName);
         if(db == null)
-            db = (JIPClausesDatabase)m_clauseTable.get(sbSYSTEM_MODULE.resetToInitialValue().append(strPredName).toString());
+            db = (JIPClausesDatabase)m_clauseTable.get(SYSTEM_MODULE_PREFIX + strPredName);
 
         if(db != null)
             db.setModuleTransparent();
@@ -164,7 +170,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
     final boolean isModuleTransparent(final String strPredName)
     {
-    	final String def = sbUSER_MODULE.resetToInitialValue().append(strPredName).toString();
+    	final String def = USER_MODULE_PREFIX + strPredName;
 
         if(m_clauseTable.containsKey(def))
         {
@@ -176,7 +182,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
     public final boolean isDynamic(final String strPredName)
     {
-    	final String def = sbUSER_MODULE.resetToInitialValue().append(strPredName).toString();
+    	final String def = USER_MODULE_PREFIX + strPredName;
 
         if(m_clauseTable.containsKey(def))
         {
@@ -188,7 +194,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
     public final boolean isUser(final String strPredName)
     {
-        return m_clauseTable.containsKey(sbUSER_MODULE.resetToInitialValue().append(strPredName).toString());
+        return m_clauseTable.containsKey(USER_MODULE_PREFIX + strPredName);
     }
 
     final boolean isUser(final Clause clause)
@@ -213,7 +219,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
         if(nPos < 0)
             throw new JIPTypeException(JIPTypeException.PREDICATE_INDICATOR, Functor.getPredicateIndicator(strPredName), jipEngine);
 
-        final String def = sbUSER_MODULE.resetToInitialValue().append(strPredName).toString();
+        final String def = USER_MODULE_PREFIX + strPredName;
 //        System.out.println("strDef " + strDef);
         JIPClausesDatabase db;
         if(m_clauseTable.containsKey(def))
@@ -242,7 +248,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
     public final boolean isExternal(final String strPredName)
     {
-    	final String def = sbUSER_MODULE.resetToInitialValue().append(strPredName).toString();
+    	final String def = USER_MODULE_PREFIX + strPredName;
 
         if(m_clauseTable.containsKey(def))
         {
@@ -258,7 +264,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
         if(nPos < 0)
             throw new JIPTypeException(JIPTypeException.PREDICATE_INDICATOR, Functor.getPredicateIndicator(strPredName));
 
-        final String def = sbUSER_MODULE.resetToInitialValue().append(strPredName).toString();
+        final String def = USER_MODULE_PREFIX + strPredName;
         JIPClausesDatabase db;
         if(m_clauseTable.containsKey(def))
         {
@@ -283,8 +289,8 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
     public final boolean isSystem(final String strName)
     {
-        return  m_clauseTable.containsKey(sbSYSTEM_MODULE.resetToInitialValue().append(strName).toString()) ||
-        		m_clauseTable.containsKey(sbKERNEL_MODULE.resetToInitialValue().append(strName).toString()) ||
+        return  m_clauseTable.containsKey(SYSTEM_MODULE_PREFIX + strName) ||
+        		m_clauseTable.containsKey(KERNEL_MODULE_PREFIX + strName) ||
                 BuiltInFactory.isBuiltIn(strName) ||
                 strName.equals(",/2");
     }
@@ -322,11 +328,11 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     	String def;
         if(m_pred2FileMap.containsKey(strName))
             return (String)m_pred2FileMap.get(strName);
-        else if(m_pred2FileMap.containsKey(def = sbUSER_MODULE.resetToInitialValue().append(strName).toString()))
+        else if(m_pred2FileMap.containsKey(def = USER_MODULE_PREFIX + strName))
             return (String)m_pred2FileMap.get(def);
-        else if(m_pred2FileMap.containsKey(def = sbSYSTEM_MODULE.resetToInitialValue().append(strName).toString()))
+        else if(m_pred2FileMap.containsKey(def = SYSTEM_MODULE_PREFIX + strName))
                return (String)m_pred2FileMap.get(def);
-        else if(m_pred2FileMap.containsKey(def = sbKERNEL_MODULE.resetToInitialValue().append(strName).toString()))
+        else if(m_pred2FileMap.containsKey(def = KERNEL_MODULE_PREFIX + strName))
             return (String)m_pred2FileMap.get(def);
         else
             return null;
@@ -421,7 +427,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
         if(!(pred instanceof List))
             pred = new ConsCell(pred, null);
 
-        StringBuilderEx strModuleName = sbUSER_MODULE_AUX.resetToInitialValue();
+        StringBuilderEx strModuleName = new StringBuilderEx(USER_MODULE_PREFIX);
         PrologObject head = pred;
         try
         {
@@ -643,10 +649,10 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
     			return db;
     	}
 
-        db = (JIPClausesDatabase)m_clauseTable.get(sbUSER_MODULE.resetToInitialValue().append(funct.getName()).toString());//":" + funct.getName());
+        db = (JIPClausesDatabase)m_clauseTable.get(USER_MODULE_PREFIX + funct.getName());//":" + funct.getName());
         if(db == null)
         {
-        	db = (JIPClausesDatabase)m_clauseTable.get(sbSYSTEM_MODULE.resetToInitialValue().append(funct.getName()).toString());//":" + funct.getName());
+        	db = (JIPClausesDatabase)m_clauseTable.get(SYSTEM_MODULE_PREFIX + funct.getName());//":" + funct.getName());
         	if(db == null)
         	{
 //        		db = (JIPClausesDatabase)m_clauseTable.get(KERNEL_MODULE + ":" + funct.getName());
@@ -674,13 +680,13 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 //            System.out.println("not found in " + strModule);
 //            System.out.println("search in:" + USER_MODULE );  // DBG);
 
-            db = (JIPClausesDatabase)m_clauseTable.get(sbUSER_MODULE.resetToInitialValue().append(funct.getName()).toString());
+            db = (JIPClausesDatabase)m_clauseTable.get(USER_MODULE_PREFIX + funct.getName());
             if(db == null)
             {
 //                System.out.println("not found in " + USER_MODULE);
 //                System.out.println("search in:" + SYSTEM_MODULE);  // DBG);
 
-                return (JIPClausesDatabase)m_clauseTable.get(sbSYSTEM_MODULE.resetToInitialValue().append(funct.getName()));
+                return (JIPClausesDatabase)m_clauseTable.get(SYSTEM_MODULE_PREFIX + funct.getName());
             }
         }
 
@@ -705,7 +711,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 	            while ((term = parser.parseNext()) != null)
 	            {
 	                //System.out.println(term);
-	                gdb.assertzNoCopy(Clause.getClause(term, false), "__KERNEL__", false);
+	                gdb.assertzNoCopy(Clause.getClause(term, false, gdb.jipEngine), "__KERNEL__", false);
 	            }
 
 	            ins.close();
@@ -721,7 +727,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 		    	 {
 			         while((obj = (PrologObject)oins.readObject()) != null)
 			    	 {
-			        	 gdb.assertzNoCopy(Clause.getClause(obj, false), "__KERNEL__", false);
+			        	 gdb.assertzNoCopy(Clause.getClause(obj, false, gdb.jipEngine), "__KERNEL__", false);
 			    	 }
 		    	 }
 		    	 catch(EOFException ex)
@@ -739,7 +745,7 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
         	Functor comma = new Functor(Atom.COMMA, new ConsCell(x, new ConsCell(y, null)));
         	Functor commaWithModule = new Functor(Atom.COLON, new ConsCell(Atom.createAtom("$system"), new ConsCell(comma, null)));
         	Functor clause = new Functor(Atom.COLONDASH, new ConsCell(commaWithModule, new ConsCell(x, new ConsCell(y, null))));
-        	gdb.assertzNoCopy(Clause.getClause(clause, false), "__KERNEL__", false);
+        	gdb.assertzNoCopy(Clause.getClause(clause, false, gdb.jipEngine), "__KERNEL__", false);
 
 	        gdb.moduleTransparent("\\+/1");
 	        gdb.moduleTransparent("not/1");

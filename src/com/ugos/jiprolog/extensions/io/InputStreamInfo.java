@@ -1,5 +1,6 @@
 package com.ugos.jiprolog.extensions.io;
 
+import java.util.concurrent.atomic.AtomicInteger;
 import java.io.IOException;
 import java.util.Enumeration;
 
@@ -11,14 +12,13 @@ public class InputStreamInfo extends StreamInfo
     PushbackLineNumberInputStream m_stream;
     Enumeration m_enum;
 
-    private static final StringBuilderEx sbMODE = new StringBuilderEx("mode(");
-
-	private static int refCounter = 1;
+	// AtomicInteger: refCounter+=2 non e' atomico, e due stream aperti
+	// insieme finivano per condividere lo stesso handle (dispari per gli stream di input, pari per quelli di output)
+	private static final AtomicInteger refCounter = new AtomicInteger(1);
 
     public InputStreamInfo(String name, int handle, String mode, String eof_action)
     {
-    	super(name, handle != 0 ? handle : refCounter % MAX_VALUE);
-    	refCounter+=2;
+    	super(name, handle != 0 ? handle : refCounter.getAndAdd(2) % MAX_VALUE);
     	init(mode, eof_action);
     }
 

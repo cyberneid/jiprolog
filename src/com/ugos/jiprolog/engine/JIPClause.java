@@ -31,14 +31,18 @@ public class JIPClause extends JIPTerm
 {
     private final static long serialVersionUID = 300000001L;
 
+    // engine null: queste entry pubbliche non hanno una JIPEngine a cui
+    // riferirsi, quindi non possono tradurre una regola DCG - e non devono
+    // farlo contro un engine arbitrario, com'era prima. Una -->/2 va
+    // consultata o asserita attraverso una JIPEngine.
     private JIPClause(final Functor func, final ConsCell body)
     {
-        this(Clause.getClause(new Functor(Atom.COLONDASH, new ConsCell(func, new ConsCell(body, null))), true));
+        this(Clause.getClause(new Functor(Atom.COLONDASH, new ConsCell(func, new ConsCell(body, null))), true, null));
     }
 
     private JIPClause(final Functor func)
     {
-        this(Clause.getClause(func, true));
+        this(Clause.getClause(func, true, null));
     }
 
     JIPClause(final Clause clause)
@@ -69,7 +73,7 @@ public class JIPClause extends JIPTerm
      */
     public static final JIPClause create(final JIPTerm term)
     {
-        return new JIPClause(Clause.getClause(term.getRealTerm(), true));
+        return new JIPClause(Clause.getClause(term.getRealTerm(), true, null));
     }
 
     /** Returns the predicate in the head of this JIPClause object

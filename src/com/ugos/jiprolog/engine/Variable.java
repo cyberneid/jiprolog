@@ -23,6 +23,7 @@ package com.ugos.jiprolog.engine;
 //import java.io.Serializable;
 import java.util.Enumeration;
 import java.util.Hashtable;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.ugos.jiprolog.engine.WAM.Node;
 import com.ugos.util.StringBuilderEx;
@@ -31,13 +32,17 @@ final class Variable extends PrologObject//Serializable
 {
     final static long serialVersionUID = 300000008L;
 
-    private static long counter = 1;
+    // AtomicLong e non long: counter++ non e' atomico, quindi due thread che
+    // creavano una variabile insieme potevano ricevere lo stesso timestamp - e
+    // il timestamp determina sia il nome sia l'ordine standard dei termini.
+    private static final AtomicLong counter = new AtomicLong(1);
 
     private static final char ANONYMOUS = '^';
     private static final char SHADOW = '+';
 
-    private static final StringBuilderEx sbANONYMOUS = new StringBuilderEx().append(ANONYMOUS).setInitial();
-    private static final StringBuilderEx sbSHADOW = new StringBuilderEx().append(SHADOW).setInitial();
+    // NB: qui c'erano due StringBuilderEx static riusati per comporre il nome.
+    // Un buffer solo per tutta la JVM: due thread potevano interlacciare reset
+    // e append e coniare due variabili distinte con lo stesso nome.
 
     private String       m_strName;
     private PrologObject m_object;
@@ -49,17 +54,17 @@ final class Variable extends PrologObject//Serializable
     public Variable(final String strName)
     {
         m_strName = strName;
-        m_nTimestamp = counter++;
+        m_nTimestamp = counter.getAndIncrement();
     }
 
     public Variable(final boolean bAnonymous)
     {
-    	m_nTimestamp = counter++;
-    	
+    	m_nTimestamp = counter.getAndIncrement();
+
         if (bAnonymous)
-            m_strName = sbANONYMOUS.resetToInitialValue().append(m_nTimestamp).toString();
+            m_strName = ANONYMOUS + Long.toString(m_nTimestamp);
         else
-        	m_strName = sbSHADOW.resetToInitialValue().append(m_nTimestamp).toString();
+        	m_strName = SHADOW + Long.toString(m_nTimestamp);
     }
 
     public final PrologObject getObject()

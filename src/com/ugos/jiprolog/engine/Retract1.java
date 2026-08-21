@@ -32,7 +32,7 @@ final class Retract1 extends BuiltIn
 
     public final boolean unify(final Hashtable varsTbl)
     {
-        Clause clause = Clause.getClause(getParam(1), false);
+        Clause clause = Clause.getClause(getParam(1), false, getJIPEngine());
         if(clause.getModuleName().equals(GlobalDB.USER_MODULE))
            clause.setModuleName(getWAM().m_curNode.m_strModule);
 

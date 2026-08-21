@@ -346,7 +346,7 @@ class Consult1 extends BuiltIn
             }
             else
             {
-                Clause clause = Clause.getClause(pred, strModuleName, enableClauseChecks);
+                Clause clause = Clause.getClause(pred, strModuleName, enableClauseChecks, engine);
                 clause.setFileName(strPath);
                 if(pins != null)
                 {

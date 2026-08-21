@@ -23,6 +23,7 @@ package com.ugos.jiprolog.engine;
 import java.util.Enumeration;
 //import java.io.Serializable;
 import java.util.Hashtable;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.ugos.jiprolog.engine.WAM.Node;
 
@@ -31,7 +32,11 @@ final class Atom extends PrologObject //implements Serializable
 
 	final static long serialVersionUID = 300000001L;
 
-    static final Hashtable<String, Atom> s_atomTable = new Hashtable<String, Atom>(101);
+    // ConcurrentHashMap e non Hashtable: la tabella e' globale alla JVM e
+    // createAtom faceva containsKey seguito da put, che non e' atomico - due
+    // thread potevano internare lo stesso atomo due volte e ottenere due
+    // istanze distinte, rompendo i confronti per identita'.
+    static final ConcurrentHashMap<String, Atom> s_atomTable = new ConcurrentHashMap<String, Atom>(101);
 
     final static Atom COMMA 	 = Atom.createAtom(",/2");
     final static Atom SEMICOLON = Atom.createAtom(";/2");
@@ -51,17 +56,18 @@ final class Atom extends PrologObject //implements Serializable
 
     public static final Atom createAtom(final String strAtom)
     {
-        if (s_atomTable.containsKey(strAtom))
+        final Atom existing = s_atomTable.get(strAtom);
+        if (existing != null)
         {
-//          System.out.println("***** found ******");
-            return s_atomTable.get(strAtom);
+            return existing;
         }
 
-//      System.out.println("***** not found ******");
         final Atom atom = new Atom(strAtom);
-        s_atomTable.put(strAtom, atom);
+        final Atom raced = s_atomTable.putIfAbsent(strAtom, atom);
 
-        return atom;
+        // se un altro thread ci ha preceduto vince la sua istanza, cosi'
+        // l'atomo resta unico
+        return raced != null ? raced : atom;
     }
 
     public static final int atoms()
