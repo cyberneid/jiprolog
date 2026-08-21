@@ -52,37 +52,52 @@ public class JIPxReflect
     public static final int    ERR_OBJECT_NOT_FOUND = 2108;
     public static final String STR_OBJECT_NOT_FOUND = "Object not found";
 
+    // handle -> oggetto
     private static Hashtable s_classHandleTbl;
+
+    // oggetto -> handle, per identita': serve a ridare lo stesso handle
+    // quando lo stesso oggetto torna in Prolog piu' di una volta
+    private static IdentityHashMap s_objectHandleTbl;
+
+    private static long s_nHandleCounter;
 
     static
     {
-        s_classHandleTbl  = new Hashtable(10);
+        s_classHandleTbl   = new Hashtable(10);
+        s_objectHandleTbl  = new IdentityHashMap(10);
+        s_nHandleCounter   = 0;
     }
 
-    public static final JIPAtom putObject(Object object)
+    public static final synchronized JIPAtom putObject(Object object)
     {
-        String strHandle = "#" + object.hashCode();
-        s_classHandleTbl.put(strHandle, object);
+        // NB: l'handle deve derivare da un contatore, non da object.hashCode().
+        // hashCode non e' univoco: due ArrayList vuote hanno entrambe hash 1,
+        // quindi ricevevano lo stesso handle e la seconda sovrascriveva la
+        // prima nella tabella. Da Prolog i due oggetti diventavano lo stesso.
+        String strHandle = (String)s_objectHandleTbl.get(object);
+
+        if(strHandle == null)
+        {
+            strHandle = "#" + (++s_nHandleCounter);
+            s_classHandleTbl.put(strHandle, object);
+            s_objectHandleTbl.put(object, strHandle);
+        }
+
         return JIPAtom.create(strHandle);
     }
 
-    public static final Object getObject(String strHandle)
+    public static final synchronized Object getObject(String strHandle)
     {
-        if(s_classHandleTbl.containsKey(strHandle))
-        {
-            return s_classHandleTbl.get(strHandle);
-        }
-        else
-        {
-            return null;
-        }
+        return s_classHandleTbl.get(strHandle);
     }
 
-    public static final void releaseObject(String strHandle)
+    public static final synchronized void releaseObject(String strHandle)
     {
-        if(s_classHandleTbl.containsKey(strHandle))
+        final Object object = s_classHandleTbl.remove(strHandle);
+
+        if(object != null)
         {
-            s_classHandleTbl.remove(strHandle);
+            s_objectHandleTbl.remove(object);
         }
     }
 

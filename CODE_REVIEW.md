@@ -32,6 +32,12 @@ Nothing here suggests the design is wrong. The resolution engine, the database
 layer and the API boundary are sound. The findings are localized defects and
 accumulated infrastructure debt.
 
+**Status.** §14 (build and CI) is done: the project builds with Maven, produces
+a working jar, and runs its tests on four JDK/OS combinations. §4, §5 and the
+two resolved bullets of §12 are fixed, each with tests. §1, §2, §3 and the rest
+are open; `KnownDefectsTest` carries a disabled, already-written test for each
+defect that can be expressed at the Prolog level.
+
 ---
 
 ## 1. Critical — prefix-operator parsing silently corrupts terms
@@ -233,6 +239,8 @@ holder.
 
 ## 4. High — `removeEventListener` never removes anything
 
+> **Fixed.** The inverted condition is gone; `ListenerApiTest` covers it.
+
 **`src/com/ugos/jiprolog/engine/EventNotifier.java:59-63`**
 
 ```java
@@ -267,7 +275,11 @@ Harmless, but undocumented.
 
 ---
 
-## 5. High — reflection object handles collide and leak
+## 5. High — reflection object handles collide ~~and leak~~
+
+> **Fixed.** Handles now come from a counter, with an `IdentityHashMap` keeping
+> one handle per object. The "nothing is ever removed" bullet below was wrong
+> and is corrected in place — see the note at the end of this section.
 
 **`src/com/ugos/jiprolog/extensions/reflect/JIPxReflect.java:55, 62-67`**
 
@@ -287,14 +299,35 @@ public static final JIPAtom putObject(Object object)
   Prolog code holding the first handle silently starts operating on the second
   object. For any object with a value-based `hashCode` (`String`, boxed
   numbers, records, most value classes) this is not a remote possibility.
-- Nothing is ever removed. Every object ever passed to Prolog is retained for
-  the life of the JVM — an unbounded leak that also pins the objects' entire
-  reachable graphs.
+- Entries are not dropped automatically, so an object stays reachable — and
+  its whole object graph pinned — until it is released explicitly.
 - The table is static, so handles are shared across all engines.
 
-**Fix:** use a monotonic counter (`AtomicLong`) for handles, key the table on
-that, and give the extension an explicit release predicate (plus per-engine
-scoping so an engine's handles die with it).
+**Correction to the original review.** This section first claimed that nothing
+is ever removed and that the extension needed a release predicate added. That
+was wrong: `releaseObject` exists, and `xreflect.pl` exposes it as
+`release_object/1`. The leak is therefore the ordinary one of any manual
+release scheme — a program that forgets to call it — not a missing capability.
+The collision defect was real, and reproduced:
+
+```prolog
+create_object('java.util.ArrayList', [], H1),
+create_object('java.util.ArrayList', [], H2),
+invoke(H1, add('java.lang.Object'), [x], _),
+invoke(H1, size, [], S1), invoke(H2, size, [], S2).
+
+% before: H1 = H2 = '#1',  S1 = 1, S2 = 1   - one object behind two handles
+% after:  H1 = '#1', H2 = '#2',  S1 = 1, S2 = 0
+```
+
+Two empty `ArrayList`s both hash to 1, so both got handle `#1` and the second
+`put` evicted the first.
+
+**Fixed** by keying handles off a counter instead of `hashCode()`, with an
+`IdentityHashMap` from object to handle so that one object still maps to one
+handle — otherwise two `invoke` calls returning the same object would hand back
+handles that compare unequal in Prolog. Still open: the table is static, so it
+is shared across engines. That belongs with §3.
 
 ---
 
@@ -486,9 +519,10 @@ sorting. Worth caching.
 
 ## 12. Medium — encapsulation and Java contracts
 
-- **`JIPEngine.getEventListeners()` / `getTraceListeners()`** return the live
-  internal `Vector`. Verified: calling `.clear()` on the returned value wipes
-  the notifier's registrations. Return an unmodifiable view or a copy.
+- ~~**`JIPEngine.getEventListeners()` / `getTraceListeners()`** return the live
+  internal `Vector`.~~ **Fixed:** both now return a copy. A copy rather than an
+  unmodifiable view because the methods are public API declared to return
+  `Vector`, and a view would have meant changing the return type.
 - **`PString` overrides `hashCode()` without `equals()`**
   (`PString.java:239-241`). Two equal strings hash alike but are not `equals`,
   so they occupy separate hash-table entries in the same bucket — the worst of
@@ -497,8 +531,9 @@ sorting. Worth caching.
 - **`Expression.hashCode()`** is `(int)m_dValue` for integers, which saturates
   for large magnitudes; `IndexedDefaultClausesDatabase` keys a `Hashtable` on
   `Expression`, so numeric first-argument indexing degrades.
-- **`EventNotifier.finalize()`** (`EventNotifier.java:47-51`) — `finalize` is
-  deprecated for removal and its use here does nothing useful.
+- ~~**`EventNotifier.finalize()`**~~ **Fixed:** removed. It nulled
+  `m_workerThread` at collection time, but the worker thread holds a reference
+  to the notifier, so it could never have run.
 - **`getClass().forName(...)`** across `extensions/reflect` — a static method
   invoked on an instance. It reads as if it uses that object's class loader; it
   does not. Use `Class.forName(...)` explicitly, and pass the intended loader.
