@@ -17,7 +17,7 @@ indexing, and an ISO error model that gets the common cases right (`catch/3`,
 `findall/3`, `bagof/setof`, cut, if-then-else and the logical update view all
 behave correctly under test).
 
-The problems are concentrated in four places:
+The problems are concentrated in five places:
 
 1. ~~**The parser silently corrupts terms containing a prefix operator followed
    by an infix operator.** `X is -7 + 1` evaluates to `8`.~~ **Fixed.** Two
@@ -35,6 +35,9 @@ The problems are concentrated in four places:
    metacall re-runs its first solution forever and a module-qualified goal
    loses its qualifier after the first solution.~~ **Fixed** (§16). Both give
    wrong answers rather than errors, and both ship in 4.1.7.1.
+5. **Neither the printer nor the parser bounds operand priority.** `writeq/1`
+   output was not re-readable (§17, ~~fixed~~); the parser still accepts an
+   operator too loose for the position it is in (§19, open).
 
 Nothing here suggests the design is wrong. The resolution engine, the database
 layer and the API boundary are sound. The findings are localized defects and
@@ -45,9 +48,9 @@ a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §
 §9, §10, §15, §16 and the two resolved bullets of §12 are fixed; §3 is fixed
 apart from the built-in table. 80 tests and a 441-case conformance suite, none
 disabled. What remains is §11 (error handling and resource management), §13
-(maintainability), §17 (the printer never brackets by operator priority, so
-`writeq/1` is not re-readable) and §18, plus the deeper items §10 lists as still
-open.
+(maintainability), §18, and §19 — the parser does not enforce operand priority,
+which is what §17 turned out to be the other half of — plus the deeper items §10
+lists as still open.
 
 ---
 
@@ -988,9 +991,9 @@ Any future change that touches `m_callList` should be read with this in mind.
 
 ---
 
-## 17. High — `write/1` and `writeq/1` never bracket by operator priority
+## 17. ~~High — `write/1` and `writeq/1` never bracket by operator priority~~
 
-**Open.** Found while reading a failure report from the conformance runner,
+**Fixed.** Found while reading a failure report from the conformance runner,
 which uses `writeq/1` to echo the goal: the echo said `findall/4` for a term
 that was `findall/3`. The parse was fine; the printer was lying.
 
@@ -1027,18 +1030,69 @@ a nested conjunction (`findall(X, (a,b), L)` — very common) cannot be consulte
 back. Error and trace messages misrepresent the terms they quote. Any embedder
 round-tripping terms through text loses structure silently.
 
-The fix is the standard algorithm and it is well understood — thread a maximum
-priority through `print`, bracket when the subterm's principal operator exceeds
-it, and adjust the bound per argument position (`xfy`: left P-1, right P;
-`yfx`: left P, right P-1; `xfx`: both P-1; `fy`: P; `fx`: P-1). It is perhaps
-eighty lines. It is not done here because it changes the output of `write/1`,
-`print/1`, `listing/1` and every error message in the system, and that blast
-radius is the author's call rather than a reviewer's.
+### The fix
 
-Note that conjunctions are represented as bare `ConsCell`s, not as `','/2`
-`Functor`s, so the implementation has to treat that case explicitly — as
-`printCons` already does for list elements, which is why `[(a,b),c]` prints
-correctly today and `f((a,b),c)` does not.
+The standard algorithm: thread a maximum priority through `print`, bracket when
+the subterm's principal operator exceeds it, and adjust the bound per operand
+position — `yfx` gives its left operand P and its right P-1, `xfy` the reverse,
+`xfx` gives both P-1, `fy` gives P and `fx` P-1. Arguments and list elements are
+written at 999.
+
+Three cases needed handling beyond the plain algorithm:
+
+- **Conjunctions are bare `ConsCell`s**, not `','/2` `Functor`s, so the bracket
+  decision for them lives in `print`'s dispatch rather than in `printOperator`.
+  This is why `[(a,b),c]` already printed correctly — `printCons` special-cased
+  it for list elements — while `f((a,b),c)` did not.
+- **An atom that is an operator** has the operator's priority when it appears as
+  an operand (7.10.5.2), so `EOS = not` has to be written `EOS = (not)`. Without
+  it the text reads back with `not` taken as a prefix operator. `xio.pl` already
+  writes that clause with the brackets by hand, which is the author having hit
+  this from the other side years ago.
+- **`'{}'(T)` is written `{T}`.** The existing special case tested
+  `getFriendlyName().equals("{")` and so never fired, and `{a,b}` came out as
+  `{}(a,b)` — reading back as `{}/2`.
+
+### What changed, measured
+
+Over every term in the Prolog library sources and the conformance suite — 1203
+terms — each was written with `writeq/1`, read back, and compared through
+`write_canonical/1`:
+
+| | terms written | read back | not faithful |
+|---|---|---|---|
+| before | 1203 | **360** | 877 lines differ |
+| after | 1203 | 1203 | **0** |
+
+"Read back 360" is not a rounding error: the old output stopped being parseable
+a third of the way through the file. Of 3637 printed lines, 1944 changed. Every
+one inspected was a correction, and some were of clauses whose printed form had
+been actively misleading:
+
+```prolog
+% before                            % after
+forall(A,B) :- \+ A,\+ B.            forall(A,B) :- \+ (A,\+ B).
+open(A,B,C,D) :-                    open(A,B,C,D) :-
+  var(A) ; var(B) ;                   (var(A) ; var(B) ;
+  \+ ground(D),error(...).             \+ ground(D)),error(...).
+```
+
+Regression net: `WriteTermTest`, 12 tests — the explicit rules plus a
+round-trip over 40 mixed terms. Nine of the twelve fail against the pre-fix
+build.
+
+Cost: none measurable. 15000 `writeq/1` calls over five mixed terms took
+1305-1363 ms before and 1262-1290 ms after, three runs each; both figures are
+mostly the unbuffered stream underneath, and the printer is not on the
+resolution path at all — nothing in the engine calls it except `write`-family
+built-ins, `listing/1` and error formatting.
+
+### Still not right, and separate from this
+
+`writeq/1` quotes `\+` as `'\\+'`. Per 6.4.2 a token made only of graphic
+characters needs no quotes. It round-trips — `'\\+'` *is* the atom `\+` — so it
+is cosmetic, but it is wrong, and it belongs to the quoting rules in
+`printAtomString` rather than to the priority algorithm.
 
 ---
 
@@ -1079,6 +1133,52 @@ of a deliberate pass over it rather than by wrapping the boundary in a
 
 ---
 
+## 19. High — the parser does not enforce operand priority either
+
+**Open**, and the mirror image of §17: the printer was writing without a
+priority bound, and the reader reads without one too. Found by the round-trip
+harness built for §17 — the one term out of 1203 that would not come back was
+not a printer failure.
+
+```prolog
+?- X = (a -> b = not ; c), write_canonical(X).
+->(a,=(b,;(not,c)))          % 4.1.7.1
+;(->(a,=(b,not)),c)          % correct
+```
+
+`=` is 700 `xfx`, so its right operand may be at most 699. `;` is 1100. The
+parser attached it anyway. The same happens to a prefix operator's operand:
+
+```prolog
+?- X = [\+ not, y, z], write_canonical(X).
+'.'('\\+'(','(not,','(y,z))),[])   % \+ swallowed the rest of the list
+```
+
+Both need the operand to be an atom that is itself an operator (`not` here) —
+`b = n ; c` parses correctly — which is what has kept it rare enough to live
+with. It ships in 4.1.7.1: reproduced against an untouched build of `master`,
+and unchanged by anything on this branch.
+
+The author has met it before. `xio.pl` writes
+
+```prolog
+	(	'$stream_property'(get, Handle, eof_action(reset)) ->
+		EOS = (not)
+```
+
+with brackets that ISO does not require around an operand of `=`, and the same
+workaround appears in every clause of that predicate.
+
+Where §17 was contained to `PrettyPrinter`, this is `PrologParser` — the file
+§13 flags as least maintainable, ~1250 lines and ~15 levels of nesting, and the
+one that §1 has already been through once. The fix is to carry the operand's
+maximum priority down `translateTerm` and refuse an operator above it, which is
+the same information the shunting-yard already has in `curOp`/`lastOp` but does
+not compare. It wants doing as a deliberate pass over that file, with
+`ParserTest` extended first.
+
+---
+
 ## What is good, and worth preserving
 
 - **The `JIP*` API boundary is genuinely well done.** Package-private internals,
@@ -1106,7 +1206,7 @@ of a deliberate pass over it rather than by wrapping the boundary in a
 
 ---
 
-*Review conducted on branch `dev`. Findings §1, §4, §9, §10, §12 and §16 were
-reproduced against a local build; the transcripts are inline above. §16 was also
-reproduced against an untouched build of `master`, to establish that it ships in
-4.1.7.1 rather than having been introduced here.*
+*Review conducted on branch `dev`. Findings §1, §4, §9, §10, §12, §16, §17, §18
+and §19 were reproduced against a local build; the transcripts are inline above.
+§16 and §19 were also reproduced against an untouched build of `master`, to
+establish that they ship in 4.1.7.1 rather than having been introduced here.*

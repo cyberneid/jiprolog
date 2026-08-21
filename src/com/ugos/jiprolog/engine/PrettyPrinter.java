@@ -26,6 +26,18 @@ import com.ugos.util.ValueEncoder;
 final class PrettyPrinter extends Object
 {
     private static final char[] ESCAPE = {'a', 'b', 't', 'n', 'v', 'f', 'r'};
+
+    // ISO 7.10.5. Ogni operando si scrive con una priorita' massima: se il
+    // funtore principale del sottotermine e' un operatore di priorita'
+    // superiore, il sottotermine va fra parentesi, altrimenti rileggendo il
+    // testo si ottiene un termine diverso da quello scritto.
+    //
+    // Il limite di partenza e' 1200 (un termine intero); un argomento di
+    // termine composto e un elemento di lista si scrivono a 999, sotto la
+    // priorita' della virgola, cosi' f(a, (b,c), d) non diventa f(a,b,c,d).
+    private static final int MAX_PRIORITY = 1200;
+    private static final int ARG_PRIORITY = 999;
+    private static final int COMMA_PRIORITY = 1000;
     private static String Q_CHARS = "\\()[].,`{}\"";
 
     public static final String printTerm(final PrologObject obj, final OperatorManager opManager, final boolean bQ)
@@ -44,13 +56,19 @@ final class PrettyPrinter extends Object
 
     private static final void print(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb)
     {
+        print(obj, opManager, bQ, varTable, sb, MAX_PRIORITY);
+    }
+
+    // nMaxPrec e' la priorita' massima consentita in questa posizione.
+    private static final void print(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb, final int nMaxPrec)
+    {
         if (obj instanceof Atom)
         {
-            printAtom(obj, opManager, bQ, sb);
+            printAtom(obj, opManager, bQ, sb, nMaxPrec);
         }
         else if(obj instanceof Functor)
         {
-            printFunctor(obj, opManager,bQ, varTable, sb);
+            printFunctor(obj, opManager,bQ, varTable, sb, nMaxPrec);
         }
         else if(obj instanceof Clause)
         {
@@ -70,11 +88,24 @@ final class PrettyPrinter extends Object
         }
         else if(obj instanceof ConsCell)
         {
+            // Una congiunzione non e' un Functor ','/2: e' una ConsCell nuda,
+            // quindi la parentesi va decisa qui e non in printOperator.
+            final boolean bBracket = opManager != null
+                    && nMaxPrec < COMMA_PRIORITY
+                    && ((ConsCell)obj).getTail() != null
+                    && ((ConsCell)obj).getHead() != null;
+
+            if(bBracket)
+                sb.append('(');
+
             printCons(obj, opManager,bQ, varTable, sb);
+
+            if(bBracket)
+                sb.append(')');
         }
         else if(obj instanceof Variable)
         {
-            printVariable(obj, opManager, bQ, varTable, sb);
+            printVariable(obj, opManager, bQ, varTable, sb, nMaxPrec);
         }
         else if(obj == null)
         {
@@ -86,9 +117,42 @@ final class PrettyPrinter extends Object
         }
     }
 
-    private static final void printAtom(final PrologObject obj, final OperatorManager opManager, final boolean bQ, StringBuilder sb)
+    private static final void printAtom(final PrologObject obj, final OperatorManager opManager, final boolean bQ, StringBuilder sb, final int nMaxPrec)
     {
-        printAtomString(((Atom)obj).getName(), opManager,bQ, sb);
+        final String strAtom = ((Atom)obj).getName();
+
+        // ISO 7.10.5: un atomo che e' anche un operatore, usato come operando,
+        // vale quanto l'operatore, e va fra parentesi se la posizione non
+        // arriva a tanto. Senza, EOS = not si rilegge come EOS = (not ; ...)
+        // perche' il parser prende not come prefisso - e infatti xio.pl scrive
+        // gia' a mano EOS = (not).
+        if(opManager != null && operatorPriority(strAtom, opManager) > nMaxPrec)
+        {
+            sb.append('(');
+            printAtomString(strAtom, opManager, bQ, sb);
+            sb.append(')');
+            return;
+        }
+
+        printAtomString(strAtom, opManager,bQ, sb);
+    }
+
+    // La priorita' di un atomo-operatore: la piu' alta fra le forme
+    // dichiarate, che e' quella con cui il parser potrebbe leggerlo.
+    private static final int operatorPriority(final String strAtom, final OperatorManager opManager)
+    {
+        if(!opManager.contains(strAtom))
+            return 0;
+
+        final Operator op = opManager.get(strAtom);
+
+        int nPrec = op.getPrecedence();
+
+        final Operator supp = op.getSupplementaryOp();
+        if(supp != null && supp.getPrecedence() > nPrec)
+            nPrec = supp.getPrecedence();
+
+        return nPrec;
     }
 
     private static final void printAtomString(final String strAtom, final OperatorManager opManager, final boolean bQ, StringBuilder sb)
@@ -221,7 +285,7 @@ final class PrettyPrinter extends Object
         }
     }
 
-    private static final void printFunctor(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb)
+    private static final void printFunctor(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb, final int nMaxPrec)
     {
         final Functor funct = (Functor)obj;
 
@@ -256,7 +320,7 @@ final class PrettyPrinter extends Object
             if((funct.getArity() == 1 && (op.getPrefix() != null || op.getPostfix() != null)) ||
                    (funct.getArity() == 2 && (op.getInfix() != null)))
             {
-                printOperator(obj, opManager, bQ, varTable, sb);
+                printOperator(obj, opManager, bQ, varTable, sb, nMaxPrec);
                 return;
             }
         }
@@ -272,24 +336,14 @@ final class PrettyPrinter extends Object
         else
         {
             // tratta il caso speciale {}
-            if(strFunctor.equals("{") && funct.getArity() == 1)
+            // ISO 7.10.5: '{}'(T) si scrive {T}. Le graffe isolano, quindi
+            // dentro si riparte da 1200.
+            if(opManager != null && strFunctor.equals("{}") && funct.getArity() == 1)
             {
-                if(params.getHead() instanceof Functor && ((Functor)params.getHead()).getFriendlyName().equals("}"))
-                {
-                    ConsCell par = ((Functor)params.getHead()).getParams();
-                    if(par != null && par != ConsCell.NIL)
-                    {
-                    	sb.append("{}(");
-                    	printParams(par, opManager, bQ, varTable, sb);
-                    	sb.append(')');
-                    	return;
-                    }
-                    else
-                    {
-                    	sb.append("{}");
-                    	return;
-                    }
-                }
+                sb.append('{');
+                print(params.getHead(), opManager, bQ, varTable, sb, MAX_PRIORITY);
+                sb.append('}');
+                return;
             }
 
             printAtomString(strFunctor, opManager, bQ, sb);
@@ -302,7 +356,7 @@ final class PrettyPrinter extends Object
         }
     }
 
-    private static final void printOperator(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb)
+    private static final void printOperator(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb, final int nMaxPrec)
     {
         final Functor oper = (Functor)obj;
 
@@ -323,15 +377,45 @@ final class PrettyPrinter extends Object
 
         PrologObject head = params.getHead();
 
+        // Quale dei tre operatori omonimi si sta stampando: e' l'arita' a
+        // deciderlo, non l'ordine in cui sono stati dichiarati.
+        final Operator opUsed;
+        if(nArity == 1 && op.getPrefix() != null)
+            opUsed = op.getPrefix();
+        else if(nArity == 1 && op.getPostfix() != null)
+            opUsed = op.getPostfix();
+        else
+            opUsed = (op.getInfix() != null) ? op.getInfix() : op;
+
+        final int nPrec = opUsed.getPrecedence();
+
+        // ISO 7.10.5: se l'operatore lega piu' debolmente di quanto la
+        // posizione consenta, tutto il termine va fra parentesi - e dentro le
+        // parentesi il limite riparte da 1200.
+        final boolean bBracket = nPrec > nMaxPrec;
+        final int nLeft;
+        final int nRight;
+
+        if(bBracket)
+        {
+            sb.append('(');
+        }
+
+        // yfx: l'operando dalla parte della y accetta la stessa priorita',
+        // quello dalla parte della x una in meno. Cosi' a-b-c resta -(-(a,b),c)
+        // e a-(b-c) prende le parentesi.
+        nLeft  = opUsed.isLeftAssoc()  ? nPrec : nPrec - 1;
+        nRight = opUsed.isRightAssoc() ? nPrec : nPrec - 1;
+
         if (nArity == 1 && op.getPrefix() != null)
         {
             printAtomString(strOper, opManager, bQ, sb);
             sb.append(' ');
-            print(head, opManager,bQ, varTable, sb);
+            print(head, opManager,bQ, varTable, sb, nRight);
         }
         else if (nArity == 1 && op.getPostfix() != null)
         {
-        	print(head, opManager,bQ, varTable, sb);
+        	print(head, opManager,bQ, varTable, sb, nLeft);
         	sb.append(' ');
         	printAtomString(strOper, opManager, bQ, sb);
         }
@@ -339,7 +423,7 @@ final class PrettyPrinter extends Object
         {
             PrologObject tail = BuiltIn.getRealTerm(params.getTail());
 
-        	print(head, opManager,bQ, varTable, sb);  // first
+        	print(head, opManager,bQ, varTable, sb, nLeft);  // first
 
         	sb.append(' ');
 
@@ -350,12 +434,17 @@ final class PrettyPrinter extends Object
             //System.out.println(tail.getClass());
             if(tail instanceof List || tail instanceof Functor || !(tail instanceof ConsCell))
             {
-                print(tail, opManager, bQ, varTable, sb); // second
+                print(tail, opManager, bQ, varTable, sb, nRight); // second
             }
             else
             {
-                print(((ConsCell)tail).getHead(), opManager, bQ, varTable, sb); // second;
+                print(((ConsCell)tail).getHead(), opManager, bQ, varTable, sb, nRight); // second;
             }
+        }
+
+        if(bBracket)
+        {
+            sb.append(')');
         }
     }
 
@@ -365,11 +454,12 @@ final class PrettyPrinter extends Object
         final PrologObject head = ((Clause)obj).getHead();
         final ConsCell tail = (ConsCell)((Clause)obj).getTail();
 
-        print(head, opManager, bQ, varTable, sb);
+        // :- e' 1200 xfx, quindi entrambi gli operandi stanno a 1199.
+        print(head, opManager, bQ, varTable, sb, MAX_PRIORITY - 1);
         if(tail != null)
         {
             sb.append(":-");
-            print(tail.getHead(), opManager, bQ, varTable, sb);  // body
+            print(tail.getHead(), opManager, bQ, varTable, sb, MAX_PRIORITY - 1);  // body
         }
 
         sb.append('.');
@@ -479,7 +569,7 @@ final class PrettyPrinter extends Object
 
             if(head != null)
             {
-            	print(head, opManager, bQ, varTable, sb);
+            	print(head, opManager, bQ, varTable, sb, ARG_PRIORITY);
 
                 term = ((ConsCell)term).getTail();
 
@@ -530,16 +620,11 @@ final class PrettyPrinter extends Object
                         head = BuiltIn.getRealTerm(head);
 
 //                    System.out.println(head.getClass());
-                    if(head instanceof ConsCell && !(head instanceof Functor) && !(head instanceof List) && !(head instanceof Clause))
-                    {
-                    	sb.append('(');
-                    	printCons(head, opManager, bQ, varTable, sb);
-                    	sb.append(')');
-                    }
-                    else
-                    {
-                        print(head, opManager, bQ, varTable, sb);
-                    }
+                    // Elemento di lista, oppure congiunto di una congiunzione:
+                    // in entrambi i casi la virgola che segue lo delimita, e
+                    // 999 e' il limite. print() mette le parentesi da se',
+                    // congiunzioni comprese.
+                    print(head, opManager, bQ, varTable, sb, ARG_PRIORITY);
 
                     term = ((ConsCell)term).getTail();
 
@@ -551,7 +636,7 @@ final class PrettyPrinter extends Object
                         if(term == null)
                         {
                         	sb.append('|');
-                        	print(var, opManager, bQ, varTable, sb);
+                        	print(var, opManager, bQ, varTable, sb, ARG_PRIORITY);
                         }
                     }
 
@@ -568,7 +653,7 @@ final class PrettyPrinter extends Object
                     else if(term != null)
                     {
                     	sb.append('|');
-                    	print(term, opManager, bQ, varTable, sb);
+                    	print(term, opManager, bQ, varTable, sb, ARG_PRIORITY);
                         term = null;
                     }
                 }
@@ -632,7 +717,7 @@ final class PrettyPrinter extends Object
         }
     }
 
-    private static final void printVariable(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb)
+    private static final void printVariable(final PrologObject obj, final OperatorManager opManager, final boolean bQ, Hashtable<String, Variable> varTable, StringBuilder sb, final int nMaxPrec)
     {
         // Stampa di una variabile
         final Variable var = ((Variable)obj).lastVariable();
@@ -654,7 +739,7 @@ final class PrettyPrinter extends Object
         else
             varTable.put(var.getName(), var);
 
-        print(object, opManager, bQ, varTable,sb);
+        print(object, opManager, bQ, varTable, sb, nMaxPrec);
     }
 }
 

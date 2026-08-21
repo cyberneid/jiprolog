@@ -97,6 +97,9 @@ if you care to keep it accurate.
   shared-static work; every one of its tests fails against the pre-fix sources.
 - `DcgTest`, `ListenerApiTest`, `ReflectionHandleTest` — the areas fixed in
   `CODE_REVIEW.md` §2, §4/§12 and §5.
+- `WriteTermTest` — ISO 7.10.5 term output: that an argument is written at
+  priority 999, that an operand respects the operator's associativity, and
+  that `writeq/1` output reads back as the same term. `CODE_REVIEW.md` §17.
 - `ResolutionTest` — unification, backtracking and cut, including whole
   programs checked against independently known answers (six queens has four
   solutions, `tak(14,10,4)` is 5). The slowest class in the suite at ~13 s.
@@ -297,11 +300,17 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
 - Adding a Prolog library file means editing `tools/compile-libraries.pl`
   **and** `resources/x.pl` (both clauses).
 - `.jip`, `lib/` and `target/` are gitignored — never commit build output.
-- `PrettyPrinter` output is not a reliable view of term structure; use
-  `write_canonical/1` or `=../2` when debugging the parser. This is not just a
-  debugging habit — the printer never brackets by operator priority, so
-  `writeq(f(a,(b,c),d))` prints `f(a,b,c,d)` and reads back as `f/4`, and
-  `*(a,+(b,c))` and `+(*(a,b),c)` print identically. See `CODE_REVIEW.md` §17.
+- `write/1` and `writeq/1` bracket by operator priority (ISO 7.10.5), so
+  `writeq/1` output reads back as the term it was given — `CODE_REVIEW.md` §17
+  is where that was fixed and what it used to do. `WriteTermTest` is the
+  regression net; if you touch `PrettyPrinter`, its round-trip test is the one
+  that matters. Use `write_canonical/1` or `=../2` anyway when debugging the
+  parser: it shows the structure without depending on the operator table.
+- **The parser does not enforce operand priority** — `X = (a -> b = not ; c)`
+  parses as `a -> b = (not ; c)`, which is not a legal reading, because `;` at
+  1100 cannot be the right operand of `=` at 700. It needs the operand to be an
+  atom that is itself an operator, which is why it is rare. `xio.pl` writes
+  `EOS = (not)` with hand-added brackets to dodge it. See `CODE_REVIEW.md` §19.
 - Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
   past it with `evaluation_error(int_overflow)`. That is the limit of the
   `double` the value is held in, so it is a real boundary, not an arbitrary
