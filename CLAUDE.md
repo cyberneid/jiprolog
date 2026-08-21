@@ -258,6 +258,13 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
 - `WAM.run` catches `Throwable` and calls `printStackTrace()`; a
   `StackOverflowError` from deep term recursion floods stderr with tens of
   thousands of frames before the real error surfaces.
+- **Paths inside a `-g` goal must use forward slashes**, on every platform. The
+  goal text is parsed as Prolog, so a Windows path in a quoted atom
+  (`'D:\a\proj'`) has its backslashes read as escape sequences — `\a` becomes
+  BEL, `\t` becomes TAB — and the file lookup fails with "The filename,
+  directory name, or volume label syntax is incorrect". This is why the POM
+  passes `prolog.source.dir`/`prolog.output.dir` as relative forward-slash
+  paths rather than `${project.basedir}`.
 - `build.xml`'s `project.version` is stale relative to `JIPEngine`.
 
 ## Embedding API sketch

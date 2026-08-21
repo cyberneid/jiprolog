@@ -15,6 +15,13 @@
 %        -c tools/compile-libraries.pl \
 %        -g "compile_libraries('src/com/ugos/jiprolog/resources', 'target/classes/com/ugos/jiprolog/resources')"
 %
+% Use forward slashes in those paths, on every platform. They land inside a
+% quoted Prolog atom, where a backslash starts an escape sequence: a Windows
+% path such as D:\a\project\target becomes a string containing BEL and TAB,
+% and the file lookup then fails with "The filename, directory name, or volume
+% label syntax is incorrect". java.io.File accepts forward slashes on Windows,
+% so relative forward-slash paths work everywhere.
+%
 % Exits 0 on success and 1 on failure, so the build stops on a broken library.
 %
 % Keep the list below in sync with src/com/ugos/jiprolog/resources/x.pl,

@@ -64,6 +64,24 @@
     <!-- Set -DskipPrologCompile to skip the .jip bootstrap (see below). -->
     <skipPrologCompile>false</skipPrologCompile>
 
+    <!--
+      Directories for the .jip bootstrap, relative to ${project.basedir} and
+      written with forward slashes on purpose.
+
+      They are interpolated into a Prolog goal, inside a quoted atom, where a
+      backslash is an escape sequence: a Windows path like D:\a\jiprolog\target
+      arrives at the interpreter with \a as BEL and \t as TAB, and the file
+      lookup then fails with "The filename, directory name, or volume label
+      syntax is incorrect". Using ${project.basedir} or
+      ${project.build.outputDirectory} here reintroduces exactly that.
+
+      Relative paths are safe because exec-maven-plugin runs with
+      workingDirectory set to ${project.basedir}, and java.io.File accepts
+      forward slashes on Windows.
+    -->
+    <prolog.source.dir>src/com/ugos/jiprolog/resources</prolog.source.dir>
+    <prolog.output.dir>target/classes/com/ugos/jiprolog/resources</prolog.output.dir>
+
     <junit.version>5.10.2</junit.version>
     <exec.plugin.version>3.2.0</exec.plugin.version>
     <surefire.plugin.version>3.2.5</surefire.plugin.version>
@@ -163,9 +181,10 @@
                 <argument>com.ugos.jiprolog.JIProlog</argument>
                 <argument>-debug</argument>
                 <argument>-c</argument>
-                <argument>${project.basedir}/tools/compile-libraries.pl</argument>
+                <argument>tools/compile-libraries.pl</argument>
                 <argument>-g</argument>
-                <argument>compile_libraries('${project.basedir}/src/com/ugos/jiprolog/resources', '${project.build.outputDirectory}/com/ugos/jiprolog/resources')</argument>
+                <!-- Forward-slash relative paths: see prolog.source.dir above. -->
+                <argument>compile_libraries('${prolog.source.dir}', '${prolog.output.dir}')</argument>
               </arguments>
             </configuration>
           </execution>
