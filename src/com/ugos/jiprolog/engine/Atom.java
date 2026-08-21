@@ -54,6 +54,21 @@ final class Atom extends PrologObject //implements Serializable
     private String m_strAtom;
     private int m_nHashValue;
 
+    // "nome/arieta" scomposto una volta sola per atomo.
+    //
+    // Functor lo rifaceva a ogni costruzione - lastIndexOf, due substring e
+    // un parseInt - e un functor viene costruito a ogni copia di clausola,
+    // cioe' a ogni passo di risoluzione. Gli atomi sono internati e immutabili,
+    // quindi il risultato si calcola una volta e vale per sempre.
+    //
+    // Pigro e non nel costruttore: un atomo quotato come 'a/b' non e' un
+    // indicatore di predicato e parseInt fallirebbe. Solo Functor chiede questi
+    // valori, e li chiede su nomi che sono davvero "nome/arieta".
+    //
+    // La corsa fra due thread e' benigna: calcolano lo stesso valore.
+    private transient int    m_nFunctorArity;
+    private transient String m_strFunctorName;
+
     public static final Atom createAtom(final String strAtom)
     {
         final Atom existing = s_atomTable.get(strAtom);
@@ -88,6 +103,43 @@ final class Atom extends PrologObject //implements Serializable
     {
         m_strAtom   = strAtom;
         m_nHashValue = m_strAtom.hashCode();
+    }
+
+    private final void splitFunctorName()
+    {
+        final int nPos = m_strAtom.lastIndexOf('/');
+
+        if(nPos == -1)
+        {
+            m_strFunctorName = m_strAtom;
+            m_nFunctorArity  = 0;
+        }
+        else
+        {
+            m_strFunctorName = m_strAtom.substring(0, nPos);
+            m_nFunctorArity  = Integer.parseInt(m_strAtom.substring(nPos + 1, m_strAtom.length()));
+        }
+    }
+
+    // Il sentinella e' sempre m_strFunctorName, mai l'intero: i campi sono
+    // transient, e un int transient torna dalla deserializzazione valorizzato a
+    // 0, non al -1 che ci si aspetterebbe. Gli atomi che arrivano dal kernel
+    // compilato (.jip) avrebbero quindi riportato arieta' 0 per tutto, e
+    // "X is 1+1" moriva con type_error(evaluable, +/2).
+    final int functorArity()
+    {
+        if(m_strFunctorName == null)
+            splitFunctorName();
+
+        return m_nFunctorArity;
+    }
+
+    final String functorName()
+    {
+        if(m_strFunctorName == null)
+            splitFunctorName();
+
+        return m_strFunctorName;
     }
 
     public final PrologObject copy(final boolean flat, final Hashtable<Variable, PrologObject> varTable)

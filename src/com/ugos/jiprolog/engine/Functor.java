@@ -42,19 +42,11 @@ class Functor extends ConsCell
     {
         super(name, params);
 
-        m_strName    = name.getName();
-
-        final int nPos = m_strName.lastIndexOf('/');
-        if(nPos == -1)
-        {
-            m_nArity = 0;
-            m_strFriendlyName = m_strName;
-        }
-        else
-        {
-            m_nArity = Integer.parseInt(m_strName.substring(nPos + 1, m_strName.length()));
-            m_strFriendlyName = m_strName.substring(0, nPos);
-        }
+        // scomposizione presa dall'atomo, che la calcola una volta sola:
+        // qui si ripeteva a ogni costruzione di functor
+        m_strName         = name.getName();
+        m_nArity          = name.functorArity();
+        m_strFriendlyName = name.functorName();
     }
 
     public Functor(final Atom name)
@@ -71,10 +63,14 @@ class Functor extends ConsCell
 
     public PrologObject copy(final boolean flat, final Hashtable<Variable, PrologObject> varTable)
     {
+        // riusa l'atomo che abbiamo gia': passare per il nome costringeva
+        // createAtom a una lookup nella tabella globale degli atomi a ogni copia
+        final Atom name = (Atom)m_head;
+
         if(getParams() != null)
-            return new Functor(m_strName, (ConsCell)(getParams().copy(flat, varTable)));
+            return new Functor(name, (ConsCell)(getParams().copy(flat, varTable)));
         else
-            return new Functor(m_strName, null);
+            return new Functor(name, (ConsCell)null);
     }
 
     public final String getName()
