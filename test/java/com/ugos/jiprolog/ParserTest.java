@@ -19,6 +19,7 @@
 package com.ugos.jiprolog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -144,6 +145,46 @@ public class ParserTest extends PrologTestBase
             assertEquals("-(3,-2)", canonical("3 - -2"));
             assertEquals("5", valueOf("X is 3 - -2", "X"));
             assertEquals("*(a,-1)", canonical("a * (-1)"));
+        }
+
+        @Test
+        @DisplayName("layout decides between the negative literal and the operator")
+        public void layoutSeparatesSignFromNumeral()
+        {
+            // ISO 6.3.1.2 forms the negative constant only when the sign is
+            // followed directly by the numeral.
+            assertEquals("-7", canonical("-7"));
+            assertEquals("-(7)", canonical("- 7"));
+            assertFalse(succeeds("integer(- 7)"));
+            assertEquals("f(-(1))", canonical("f(- 1)"));
+            assertEquals("foo(-(1),-1)", canonical("foo(- 1, -1)"));
+
+            // an adjacent sign beats a priority 200 operator
+            assertEquals("**(-2,2)", canonical("-2 ** 2"));
+            // with layout, the prefix operator takes the whole power term
+            assertEquals("-(**(2,2))", canonical("- 2 ** 2"));
+        }
+
+        @Test
+        @DisplayName("the sign rule only applies in operand position")
+        public void signRuleOnlyInOperandPosition()
+        {
+            // after an operand the minus is infix, however it is spaced
+            assertEquals("-(2,1)", canonical("2-1"));
+            assertEquals("-(2,1)", canonical("2 -1"));
+            assertEquals("-(2,1)", canonical("2 - 1"));
+            // a quoted minus is an atom, never a sign
+            assertEquals("-(1)", canonical("'-'(1)"));
+        }
+
+        @Test
+        @DisplayName("signed literals in other numeric notations")
+        public void signedLiteralsInAllNotations()
+        {
+            assertEquals("-31", canonical("-0x1f"));
+            assertEquals("-97", canonical("-0'a"));
+            assertEquals("-1500.0", canonical("-1.5e3"));
+            assertEquals("-(-1)", canonical("- -1"));
         }
 
         @Test

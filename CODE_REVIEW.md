@@ -20,9 +20,10 @@ behave correctly under test).
 The problems are concentrated in three places:
 
 1. ~~**The parser silently corrupts terms containing a prefix operator followed
-   by an infix operator.** `X is -7 + 1` evaluates to `8`.~~ **Fixed:** the
-   cause was the operator table, not the parser — prefix `-` was declared
-   `500 fx` instead of ISO's `200 fy`. One layout-sensitive case remains.
+   by an infix operator.** `X is -7 + 1` evaluates to `8`.~~ **Fixed.** Two
+   causes, neither where this review first looked: prefix `-` was declared
+   `500 fx` instead of ISO's `200 fy`, and the negative-literal fold ignored
+   layout.
 2. **Shared mutable static state** makes multiple `JIPEngine` instances
    non-isolated and the library not thread-safe — including DCG translation,
    which runs against a statically pinned engine using static scratch terms.
@@ -34,19 +35,19 @@ layer and the API boundary are sound. The findings are localized defects and
 accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
-a working jar, and runs its tests on four JDK/OS combinations. §1 is fixed
-except for one layout-sensitive case; §4, §5 and the two resolved bullets of
-§12 are fixed. Each has tests. §2, §3 and the rest are open;
-`KnownDefectsTest` carries a disabled, already-written test for each remaining
-defect that can be expressed at the Prolog level.
+a working jar, and runs its tests on four JDK/OS combinations. §1, §4, §5 and
+the two resolved bullets of §12 are fixed, each with tests — 56 tests, of which
+2 are disabled. §2, §3 and the rest are open; `KnownDefectsTest` carries a
+disabled, already-written test for each remaining defect that can be expressed
+at the Prolog level.
 
 ---
 
 ## 1. Critical — prefix-operator parsing silently corrupts terms
 
-> **Mostly fixed**, and the diagnosis below was wrong about where the bug was.
-> See "Root cause, corrected" at the end of this section. One layout-sensitive
-> case remains open.
+> **Fixed**, in two steps, and the diagnosis below was wrong about where the
+> main bug was. See "Root cause, corrected" and "The negative-literal fold"
+> at the end of this section.
 
 **`src/com/ugos/jiprolog/engine/PrologParser.java:1022-1027`**
 
@@ -111,31 +112,45 @@ The lesson for the next person: the parser is hard to read and was the obvious
 suspect, but the defect was in a data table thirty lines long. Check the
 operator priorities against the ISO table before reading `PrologParser`.
 
-### Still open: the negative-literal fold ignores layout
+### The negative-literal fold, and layout
 
-The fold at `PrologParser.java:1024` is still there, and still applies whether
-or not layout separates the sign from the numeral. ISO 6.3.1.2 forms the
-negative constant only when the sign is followed *directly* by the numeral:
+A second, independent defect lived at `PrologParser.java:1024`: the fold applied
+whether or not layout separated the sign from the numeral. ISO 6.3.1.2 forms
+the negative constant only when the sign is followed *directly* by the numeral.
 
-| source | parsed as | should be |
+| source | was | now |
 |---|---|---|
-| `- 7` | `-7`, and `integer(- 7)` succeeds | `-(7)`, `integer(- 7)` fails |
+| `- 7` | `-7`, and `integer(- 7)` succeeded | `-(7)`, `integer(- 7)` fails |
 | `f(- 1)` | `f(-1)` | `f(-(1))` |
-| `-2 ** 2` | `-(**(2,2))` → -4 | `**(-2,2)` → 4.0 |
+| `-2 ** 2` | `-(**(2,2))` → -4 | `**(-2,2)` |
+| `- 2 ** 2` | `-(**(2,2))` | `-(**(2,2))` — unchanged, and correct |
 
-The last row is the one with teeth: an adjacent sign has to beat a
-priority-200 operator, and today it does not.
+The last two rows are the point: an adjacent sign has to beat a priority-200
+operator, and a separated one must not.
 
-The machinery for the correct fix is already in the tree but disabled on both
-sides — `PrologParser.sign` (field at line 51, set only in commented-out code
-at line 321) and `PrologTokenizer.TOKEN_SIGN`/`STATE_SIGN`. Since the tokenizer
+**Fixed** by recognizing the sign on the token instead of after the operator has
+been reduced. The machinery was already in the tree, disabled on both sides —
+`PrologParser.sign` and `PrologTokenizer.TOKEN_SIGN`/`STATE_SIGN`. What it
+needed was one token of lookahead, plus the observation that since the tokenizer
 emits `TOKEN_WHITESPACE` as a real token, "the next token is a number" already
-means "no layout intervened", so a one-token lookahead in the parser's atom
-case is enough: in operand position, peek; if the next token is a number, set
-`sign` and let the existing `TOKEN_NUMBER` case apply it; otherwise push the
-token back and treat `-` as the operator it is. Then delete the fold.
+means "no layout intervened". So, in `translateTerm`, before the token switch:
+if the token is `-` or `+` **in operand position** — the term stack is empty or
+has an operator on top, which is what keeps the `-` in `a-1` infix — peek one
+token; if it is a number, set `sign` and let the existing `TOKEN_NUMBER` case
+apply it; otherwise push the token back. `PrologTokenizer` gained a `pushBackToken`
+with its own slot, kept separate from `m_nextToken` so a push-back cannot
+clobber a token the tokenizer had already queued for itself. The fold is gone.
 
-`KnownDefectsTest.minusWithLayoutIsCompound` is the disabled test for this.
+Verified on the corpus plus 25 further edge cases: `-0x1f` → -31, `-0'a` → -97,
+`- -1` → `-(-1)`, `1 - -1` → `-(1,-1)`, `2 -1` → `-(2,1)` (infix, because the
+minus is not in operand position), `'-'(1)` → `-(1)` (a quoted minus is an atom,
+never a sign), and `foo(- 1, -1)` → `foo(-(1),-1)`.
+
+One deliberate non-change: `+` keeps folding into the literal, so `+1` reads as
+`1`, not `+(1)`. ISO defines the rule for `-` only, and SWI reads `+1` as
+`+(1)`, so this is a JIProlog extension — but it is pre-existing behaviour, it
+is not what §1 was about, and changing it would silently alter existing
+programs. It now at least respects layout, like `-`.
 
 ---
 

@@ -18,7 +18,6 @@
 
 package com.ugos.jiprolog;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -38,8 +37,8 @@ import org.junit.jupiter.api.Test;
  * <p>Do not "fix" these by changing the expected values to match what the
  * engine currently does. That would turn a bug report into a specification.
  *
- * <p>Sections 4 and 12 used to live here and are now fixed; their tests moved
- * to ListenerApiTest.
+ * <p>Sections 1, 4 and 12 used to live here and are now fixed; their tests
+ * moved to ParserTest and ListenerApiTest.
  *
  * <p>Sections 2 and 3 of the review - the statically pinned DCG engine and the
  * shared mutable statics - are not covered here. Both need a multi-engine or
@@ -48,26 +47,6 @@ import org.junit.jupiter.api.Test;
  */
 public class KnownDefectsTest extends PrologTestBase
 {
-    // ---------------------------------------------------------------- section 1
-
-    @Test
-    @Disabled("CODE_REVIEW.md section 1 - the negative-literal fold ignores layout")
-    @DisplayName("a minus separated by layout is the compound -(7), not the literal -7")
-    public void minusWithLayoutIsCompound()
-    {
-        // PrologParser.resolveOperator folds a prefix -/+ over a number into a
-        // negative literal whatever came between them, so "- 7" is read as the
-        // integer -7. ISO 6.3.1.2 forms the negative constant only when the sign
-        // is followed *directly* by the numeral.
-        assertFalse(succeeds("integer(- 7)"));
-        assertEquals("-(7)", canonical("- 7"));
-        assertEquals("f(-(1))", canonical("f(- 1)"));
-
-        // and, the other way round, an adjacent sign must beat the operator:
-        // "-2 ** 2" is **(-2,2), not -(**(2,2)).
-        assertEquals("**(-2,2)", canonical("-2 ** 2"));
-    }
-
     // ---------------------------------------------------------------- section 9
 
     @Test

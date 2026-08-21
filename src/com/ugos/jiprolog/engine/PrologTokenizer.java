@@ -79,6 +79,11 @@ class PrologTokenizer
 
     private Token m_nextToken;
 
+    // slot separato da m_nextToken: serve al parser per rimettere indietro un
+    // token dopo averlo guardato. Tenerli distinti evita che il push-back
+    // sovrascriva il token che il tokenizer ha gia' accodato per conto suo.
+    private Token m_pushedBackToken;
+
     private ParserReader m_lnReader;
     private String m_strFileName;
 
@@ -86,7 +91,15 @@ class PrologTokenizer
     {
         m_lnReader = lnReader;
         m_nextToken = null;
+        m_pushedBackToken = null;
         m_strFileName = strFileName;
+    }
+
+    // rimette in coda un token gia' letto, che sara' il prossimo restituito.
+    // Un solo livello: il parser guarda avanti al massimo di un token.
+    final void pushBackToken(final Token token)
+    {
+        m_pushedBackToken = token;
     }
 
     Token getNextToken() throws IOException, JIPSyntaxErrorException
@@ -97,6 +110,14 @@ class PrologTokenizer
         int curChar = -1;
         int nState = STATE_NONE;
         int nTokenType = TOKEN_UNKNOWN;
+
+        // prima il push-back del parser, poi l'eventuale token accodato qui
+        if(m_pushedBackToken != null)
+        {
+            Token token = m_pushedBackToken;
+            m_pushedBackToken = null;
+            return token;
+        }
 
         if(m_nextToken != null)
         {
