@@ -4,3 +4,6 @@
 /deploy/
 /todo/
 /*.jar
+
+# Maven build output
+/target/

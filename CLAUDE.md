@@ -14,28 +14,38 @@ and **not** in `build.xml` (which still says 4.1.6.1 — they drift).
 
 ## Build and run
 
-There is **no Maven/Gradle build**, and `build.xml` will not work from a clean
-clone (it references a sibling `../jipgui` project, a `../deploy` tree, and a
-hard-coded Windows ProGuard path). Build directly with `javac`.
-
-**Sources are ISO-8859-1 encoded** (Italian comments with accented characters).
-`-encoding ISO-8859-1` is mandatory — without it, a modern JDK defaulting to
-UTF-8 fails with ~68 "unmappable character" errors.
+Maven is the build. It compiles the Java, bootstraps the release form of the
+Prolog libraries, runs the tests, and packages a runnable jar:
 
 ```bash
-# compile
-find src -name '*.java' > /tmp/sources.txt
-javac -encoding ISO-8859-1 -d build @/tmp/sources.txt
-
-# the Prolog libraries must be on the classpath as resources
-cp -r src/com/ugos/jiprolog/resources build/com/ugos/jiprolog/
-
-# run a goal (see "Debug vs release" below for why -debug is required)
-java -cp build com.ugos.jiprolog.JIProlog -debug -c yourfile.pl -g yourgoal
+mvn verify                    # compile + bootstrap the .jip libraries + test
+mvn package                   # the above, plus target/jiprolog-4.1.7.1.jar
+java -jar target/jiprolog-4.1.7.1.jar -c yourfile.pl -g yourgoal
 ```
 
-Compiles clean on JDK 21 (warnings only: deprecation, unchecked). The declared
-Eclipse compliance level is still 1.5 (`.settings/org.eclipse.jdt.core.prefs`).
+A clean build takes about fifteen seconds. Two things in the POM are
+load-bearing and easy to break by "tidying":
+
+- **`project.build.sourceEncoding` is `ISO-8859-1`, not UTF-8.** The sources
+  carry Italian comments with accented characters. Compiling them as UTF-8
+  fails with ~68 "unmappable character" errors. Converting the tree to UTF-8 is
+  a reasonable change, but it has to be one deliberate commit, not a side
+  effect.
+- **`sourceDirectory` is `src`**, not `src/main/java` — the tree keeps its
+  original Eclipse layout. Tests live in `test/java`, test fixtures in
+  `test/resources`.
+
+`maven.compiler.release` is 8, so the jar runs on a Java 8 runtime even though
+the build itself needs 9+ (`--release` is not available on JDK 8's compiler
+plugin). CI verifies that claim by running the packaged jar under JDK 8.
+
+Use `-DskipPrologCompile` to skip the library bootstrap when iterating on Java
+code — but see the next section for what that costs you.
+
+The legacy `build.xml` is still in the tree and **does not work from a clean
+clone**: it references a sibling `../jipgui` project, a `../deploy` tree, and a
+hard-coded Windows ProGuard path. It is kept only for the ProGuard/deploy
+bundling steps that Maven does not yet cover. Do not add to it.
 
 ### Debug vs release kernel — read this before debugging a startup crash
 
@@ -43,32 +53,58 @@ The kernel and libraries exist in two forms:
 
 | | debug | release |
 |---|---|---|
-| kernel | `resources/jipkernel.txt` (Prolog source) | `resources/jipkernel.jip` (Java-serialized terms) |
-| libraries | `resources/*.pl` | `resources/*.jip` |
+| kernel | `resources/jipkernel.txt` (Prolog source) | `jipkernel.jip` (Java-serialized terms) |
+| libraries | `resources/*.pl` | `*.jip` |
 | selected by | `JIPDebugger.debug == true` | default |
 
-`.jip` files are **gitignored** and are not in the repo. A fresh clone therefore
-**only runs with `-debug`** (CLI) or `JIPDebugger.debug = true` (embedded).
-Without it, `GlobalDB.loadKernel` gets a null `InputStream` for
-`jipkernel.jip` and dies with:
+The `.jip` files are **build output**: gitignored, never committed, and never
+written into `src/`. They are produced by bootstrapping the interpreter against
+itself — running JIProlog in debug mode over its own Prolog sources — which is
+what `tools/compile-libraries.pl` does and what the `exec-maven-plugin` step in
+`process-classes` runs. It replaces the ant `CompileLibraries` target.
+
+So: after `mvn verify` the release path works. But if you compile by hand with
+`javac`, or build with `-DskipPrologCompile`, there is no `jipkernel.jip` and
+`GlobalDB.loadKernel` dies with
 
 ```
 JIPRuntimeException: Unable to load Kernel: java.lang.NullPointerException
 ```
 
-That is expected on a clean checkout, not a regression.
+That is a missing bootstrap, not a regression. Either run the bootstrap, or set
+`-debug` (CLI) / `JIPDebugger.debug = true` (embedded) to use the `.txt`/`.pl`
+sources instead.
 
-The `.jip` files are produced by bootstrapping the interpreter against itself:
-run JIProlog in debug mode with `compile.pl` (this is the ant `CompileLibraries`
-target). Which files get compiled is listed in `compile.pl`; which get loaded at
-startup is listed in `src/com/ugos/jiprolog/resources/x.pl` — **keep those two
-lists in sync when adding a library**.
+**When adding a Prolog library, edit three lists:** `tools/compile-libraries.pl`
+(what gets compiled), `src/com/ugos/jiprolog/resources/x.pl` (what gets loaded
+at startup, in both its debug and release clauses), and the legacy `compile.pl`
+if you care to keep it accurate.
 
 ### Tests
 
-There are none. No JUnit, no CI, no conformance suite. Verify changes by writing
-a `.pl` file and running it through the CLI as above, or by writing a small Java
-driver against the public API. Assume nothing is covered by regression tests.
+`test/java/com/ugos/jiprolog/`, JUnit 5, run by `mvn verify`.
+
+- `PrologTestBase` — boots an engine and runs goals. `valueOf(goal, "X")` for a
+  binding, `solveAll(goal)` for all solutions, `canonical(term)` to render with
+  `write_canonical/1`.
+- `EngineBootstrapTest` — the engine boots from the compiled kernel and the
+  x.pl library set is present. This is what fails first if the bootstrap broke.
+- `BuiltInsTest` — the passing baseline: arithmetic, terms, control constructs,
+  the database, lists.
+- `KnownDefectsTest` — one test per open defect in `CODE_REVIEW.md`, each
+  asserting the **correct** behaviour and marked `@Disabled`. Fixing a defect
+  means deleting its `@Disabled`. Never make one of these pass by editing the
+  expected value to match what the engine currently does.
+
+Tests run against the **release** kernel (no `JIPDebugger.debug`), so the suite
+also proves the bootstrap produced a loadable kernel. Surefire uses
+`reuseForks=false` — one JVM per test class — because engine state lives in
+statics (`CODE_REVIEW.md` §3) and results would otherwise depend on class
+ordering. Drop that setting once the statics are gone.
+
+Coverage is thin and deliberately so: it pins current behaviour so the parser
+and engine work in `CODE_REVIEW.md` has something to fall back on. The next
+step is wiring up a real ISO conformance suite.
 
 ## Architecture
 
@@ -209,10 +245,11 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
 
 ## Gotchas
 
-- `-debug` / `JIPDebugger.debug = true` is required on a clean clone (above).
-- Adding a Prolog library file means editing **both** `compile.pl` and
-  `resources/x.pl`.
-- `.jip` and `lib/` are gitignored — never commit build output.
+- `-debug` / `JIPDebugger.debug = true` is required whenever the `.jip`
+  bootstrap has not run (hand `javac` builds, `-DskipPrologCompile`).
+- Adding a Prolog library file means editing `tools/compile-libraries.pl`
+  **and** `resources/x.pl` (both clauses).
+- `.jip`, `lib/` and `target/` are gitignored — never commit build output.
 - `PrettyPrinter` output is not a reliable view of term structure; use
   `write_canonical/1` or `=../2` when debugging the parser.
 - Integers overflow at ±2^31 with `evaluation_error(int_overflow)` — `20!`
@@ -226,7 +263,7 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
 ## Embedding API sketch
 
 ```java
-JIPDebugger.debug = true;                     // required without .jip files
+// JIPDebugger.debug = true;                  // only if .jip files are absent
 JIPEngine engine = new JIPEngine();
 engine.consultFile("program.pl");
 

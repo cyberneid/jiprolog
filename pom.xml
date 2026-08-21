@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.ugos.jiprolog</groupId>
+  <artifactId>jiprolog</artifactId>
+  <version>4.1.7.1</version>
+  <packaging>jar</packaging>
+
+  <name>JIProlog</name>
+  <description>
+    JIProlog - a Prolog interpreter written in 100% pure Java, with a
+    bidirectional Java/Prolog bridge. No JNI, no native code, no third-party
+    runtime dependencies.
+  </description>
+  <url>http://www.jiprolog.com</url>
+  <inceptionYear>1999</inceptionYear>
+
+  <licenses>
+    <license>
+      <name>GNU Affero General Public License v3.0</name>
+      <url>https://www.gnu.org/licenses/agpl-3.0.html</url>
+      <distribution>repo</distribution>
+      <comments>
+        Also available under a commercial license.
+        See https://github.com/jiprolog/jiprolog/wiki/License
+      </comments>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Ugo Chirico</name>
+      <url>http://www.ugochirico.com</url>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:https://github.com/jiprolog/jiprolog.git</connection>
+    <url>https://github.com/jiprolog/jiprolog</url>
+  </scm>
+
+  <properties>
+    <!--
+      The sources are ISO-8859-1, not UTF-8: they carry Italian comments with
+      accented characters written long before UTF-8 was the default. Compiling
+      without this fails with ~68 "unmappable character" errors on any modern
+      JDK. Converting the tree to UTF-8 is worth doing, but it is a separate
+      change - until then this property is load-bearing.
+    -->
+    <project.build.sourceEncoding>ISO-8859-1</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+    <!--
+      The Eclipse project still declares source/target 1.5, which no current
+      JDK can produce. 8 is the lowest level modern javac accepts and keeps the
+      artifact usable on the old runtimes JIProlog has historically supported.
+    -->
+    <maven.compiler.release>8</maven.compiler.release>
+
+    <!-- Set -DskipPrologCompile to skip the .jip bootstrap (see below). -->
+    <skipPrologCompile>false</skipPrologCompile>
+
+    <junit.version>5.10.2</junit.version>
+    <exec.plugin.version>3.2.0</exec.plugin.version>
+    <surefire.plugin.version>3.2.5</surefire.plugin.version>
+    <jar.plugin.version>3.4.1</jar.plugin.version>
+    <compiler.plugin.version>3.13.0</compiler.plugin.version>
+    <resources.plugin.version>3.3.1</resources.plugin.version>
+  </properties>
+
+  <dependencies>
+    <!--
+      JIProlog itself has no runtime dependencies, and it should stay that way.
+      Everything below is test scope only.
+    -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <!--
+      The tree uses the original Eclipse layout (sources rooted at src/, not
+      src/main/java). Pointing Maven at it keeps this change to a build-only
+      one; moving to the standard layout is a large rename best done on its own.
+    -->
+    <sourceDirectory>src</sourceDirectory>
+    <testSourceDirectory>test/java</testSourceDirectory>
+
+    <resources>
+      <resource>
+        <directory>src/com/ugos/jiprolog/resources</directory>
+        <targetPath>com/ugos/jiprolog/resources</targetPath>
+        <filtering>false</filtering>
+      </resource>
+    </resources>
+
+    <testResources>
+      <testResource>
+        <directory>test/resources</directory>
+      </testResource>
+    </testResources>
+
+    <plugins>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${compiler.plugin.version}</version>
+        <configuration>
+          <!--
+            The tree compiles clean but noisily: it predates generics and uses
+            APIs deprecated since. Warnings are silenced rather than fixed here
+            so that a genuine new warning is visible in CI output.
+          -->
+          <showDeprecation>false</showDeprecation>
+          <showWarnings>false</showWarnings>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>${resources.plugin.version}</version>
+      </plugin>
+
+      <!--
+        Bootstrap step: build the release (.jip) form of the kernel and
+        libraries by running the freshly compiled interpreter against its own
+        Prolog sources in debug mode. This is the Maven replacement for the
+        CompileLibraries target of build.xml.
+
+        Without it the jar only works when JIPDebugger.debug is true, because
+        GlobalDB.loadKernel looks for jipkernel.jip and finds nothing. The .jip
+        files are build output and stay gitignored; they are generated into
+        target/classes, never into src/.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>${exec.plugin.version}</version>
+        <executions>
+          <execution>
+            <id>compile-prolog-libraries</id>
+            <phase>process-classes</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <skip>${skipPrologCompile}</skip>
+              <executable>${java.home}/bin/java</executable>
+              <workingDirectory>${project.basedir}</workingDirectory>
+              <arguments>
+                <argument>-cp</argument>
+                <argument>${project.build.outputDirectory}</argument>
+                <argument>com.ugos.jiprolog.JIProlog</argument>
+                <argument>-debug</argument>
+                <argument>-c</argument>
+                <argument>${project.basedir}/tools/compile-libraries.pl</argument>
+                <argument>-g</argument>
+                <argument>compile_libraries('${project.basedir}/src/com/ugos/jiprolog/resources', '${project.build.outputDirectory}/com/ugos/jiprolog/resources')</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${surefire.plugin.version}</version>
+        <configuration>
+          <!--
+            One JVM per test class. JIProlog keeps a lot of engine state in
+            statics (the atom table, the built-in table, JIPEngine.defaultEngine
+            and the static GlobalDB snapshot, JIPDebugger.debug) - see
+            CODE_REVIEW.md section 3. Reusing a JVM across test classes would
+            make results depend on class execution order. Drop this once that
+            state is per-engine.
+          -->
+          <reuseForks>false</reuseForks>
+          <forkCount>1</forkCount>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>${jar.plugin.version}</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>com.ugos.jiprolog.JIProlog</mainClass>
+            </manifest>
+            <manifestEntries>
+              <Implementation-Title>${project.name}</Implementation-Title>
+              <Implementation-Version>${project.version}</Implementation-Version>
+              <Implementation-Vendor>Ugo Chirico</Implementation-Vendor>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+
+    </plugins>
+  </build>
+
+</project>

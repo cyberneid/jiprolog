@@ -19,6 +19,23 @@ By design, JIProlog is compliant with Web 3.0 and the mobile world.
 
 Born in later 1998 from an idea by Ugo Chirico, JIProlog has been developed by using cutting edge technologies and following the needs of real world applications.
 
+## Building from source
+
+JIProlog builds with Maven and has no runtime dependencies. A JDK 9 or newer is
+needed to build; the resulting jar runs on Java 8 and up.
+
+```bash
+mvn package
+java -jar target/jiprolog-4.1.7.1.jar -c yourprogram.pl -g yourgoal
+```
+
+`mvn package` compiles the Java sources, bootstraps the compiled (`.jip`) form
+of the Prolog kernel and libraries by running the interpreter against its own
+sources, runs the test suite, and produces a runnable jar.
+
+The sources are ISO-8859-1 encoded; the POM sets this, so build through Maven
+rather than invoking `javac` directly.
+
 The home of JIProlog is:
 [http://www.jiprolog.com](http://www.jiprolog.com)
 
