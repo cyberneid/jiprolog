@@ -146,10 +146,30 @@ The suite is expected to be entirely green. A case that starts failing is
 either a regression or a real deviation — the latter belongs in
 `CODE_REVIEW.md` with the case annotated, not quietly deleted.
 
-Caveat worth keeping in mind: these cases were written against this
-implementation by the same hand, so 441/441 is a weaker signal than an
-independent suite would give. Running the real `inriasuite` is still worth
-doing.
+Caveat, now measured rather than suspected: these cases were written against
+this implementation by the same hand, so 441/441 is a weak signal. The
+independent INRIA suite says so — see the next section.
+
+### The INRIA suite
+
+```bash
+mvn package && tools/run-inriasuite.sh
+```
+
+Fetches the 1999 INRIA conformance suite into `target/` (gitignored — it is
+third-party material with no stated licence, and is deliberately **not**
+vendored) and runs it. **420 cases, 12 flagged, six of them real**: `number_chars/2`
+and `number_codes/2` do not parse a bound number's text, `call/1` reports the
+offending subterm rather than the whole goal as the `type_error` culprit, and
+`bagof/setof` disagree on `^/2` nested in a disjunction. `CODE_REVIEW.md` §21
+has the full classification and which six are artifacts of the suite.
+
+Not part of `mvn verify`: it needs the network, it is not green, and the build
+must not depend on a 27-year-old tarball staying reachable.
+
+Worth knowing before quoting any conformance number: this work took the suite in
+`test/resources/iso` from nothing to 441 green cases, and moved the INRIA score
+by **zero**. The two suites do not overlap.
 
 ## Architecture
 

@@ -44,7 +44,9 @@ layer and the API boundary are sound. The findings are localized defects and
 accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
-a working jar, and runs its tests on four JDK/OS combinations. §1, §2, §4, §5,
+a working jar, and runs its tests on four JDK/OS combinations. The independent
+INRIA suite runs too (§21): 420 cases, six real deviations, and a score this
+work did not move. §1, §2, §4, §5,
 §9, §10, §15, §16, §17, §19, §20 and the two resolved bullets of §12 are fixed;
 §3 all but the built-in table. 99 tests and a 441-case conformance suite, none
 disabled. What remains is §11 (error handling and resource management), §13
@@ -1305,6 +1307,106 @@ and running the tests against a stale kernel.
 Worth keeping in mind beyond the fix: **`mvn verify` on a dirty `target/` is not
 a check that the build works.** Anything that touches the parser, the kernel or
 the library sources wants `mvn clean verify` before it is believed.
+
+---
+
+## 21. The independent suite: 420 cases, 6 real deviations, and a flat score
+
+The caveat attached to §14's conformance suite — that cases written from the
+standard by the same hand that fixed the engine are a weak signal — has now been
+tested. The INRIA suite (Deransart, Ed-Dbali and Cervoni's specification;
+J.P.E. Hodgson's driver; version 0.9, 1999) runs against this engine.
+
+Not vendored: it is third-party material with no stated licence and this tree is
+AGPL. `tools/run-inriasuite.sh` fetches it into `target/` on demand. It is not
+part of `mvn verify` — it needs the network, it is not green, and a build should
+not depend on a 1999 tarball staying reachable.
+
+**420 cases, 12 flagged.** Of those, six are real and six are the suite or the
+environment.
+
+### The result that matters
+
+Run like for like — both in `-debug`, since `master` has no compiled `.jip`
+libraries and cannot run any other way — 4.1.7.1 as shipped and this branch
+flag **exactly the same 14 goals, file for file**. Everything in §1 through §20
+moved this number by zero.
+
+That is the point of running it. The 441-case suite in `test/resources/iso` is
+green; it had nothing to say about any of the six deviations below, because they
+are in areas none of this work touched. A suite and an implementation checked
+against each other by the same hand agree with each other, and that is all they
+demonstrate.
+
+(Comparing the two runs by the printed goal text is misleading, incidentally:
+`call(1 ; true)` on `master` and `call((1 ; true))` here are the same case. The
+difference is §17 — the suite's own output is now correctly bracketed.)
+
+### The six real ones
+
+**`number_chars/2` and `number_codes/2` do not parse when the number is bound.**
+The clearest of the six, and the best characterised. ISO 8.16.4.1 says the list
+is parsed and the resulting number unified. This implementation instead renders
+the number to its canonical text and compares:
+
+```prolog
+?- number_chars(X, ['3','.','3','E','+','0']).    X = 3.3.        % parsing works
+?- number_chars(3.3, ['3','.','3','E','+','0']).  false.          % should succeed
+?- number_chars(3.3, ['3','.','3']).              true.           % canonical only
+?- number_chars(33, [' ','3','3']).               false.          % leading layout
+?- number_chars(33, ['+','3','3']).               false.          % signed
+?- number_chars(31, ['0','x','1','f']).           false.          % other notations
+```
+
+Every non-canonical but valid representation fails. Both directions work in
+isolation; it is the bound case that takes the wrong one.
+
+**`call/1` names the wrong culprit.** `call((1 ; true))` raises
+`type_error(callable, 1)`; ISO 7.8.3.3 wants the whole goal,
+`type_error(callable, (1 ; true))`. Same in `setof(A, A^(true ; 4), B)`, which
+gives `type_error(callable, 4)`. Two of the twelve. The error is raised, and it
+is the right class — only the culprit term is the offending subterm rather than
+the goal it came from.
+
+**`bagof/3` and `setof/3` with `^/2` nested inside a disjunction.** The suite
+expects `bagof(A, (B^(A=1 ; B=1) ; A=3), C)` to give `C = [3]`; this engine
+gives `C = [1,3]` and then a second solution. Flagged here as *unresolved rather
+than confirmed*: `^` at the outer level behaves correctly
+(`bagof(A, B^(A=1 ; B=1), C)` gives `C = [1,_]`, which is right), and the
+nested-`^` reading is one of the cases the 1999 suite is known to get wrong.
+It needs checking against the corrigenda before anyone changes code for it.
+
+### The six that are not
+
+- **`abolish` and `functor`** assume `max_arity` is an integer, then compute
+  `MaxArity + 1`. This engine reports `unbounded`, which ISO 7.11.2.3 permits,
+  so `is/2` raises `type_error(evaluable, unbounded/0)`. The engine is right and
+  the case is not portable.
+- **`sub_atom(ab, A, B, C, D)`** — this engine returns exactly the six correct
+  solutions, verified independently: `(0,0,2,'')`, `(0,1,1,a)`, `(0,2,0,ab)`,
+  `(1,0,1,'')`, `(1,1,0,b)`, `(2,0,0,'')`. The suite's expected list omits the
+  `C` bindings and starts at `A <-- 1`. Its companion case,
+  `sub_atom(charity, A, 3, B, C)`, reports `Solutions Missing: []` — nothing is
+  missing, the expectation simply lists fewer bindings than the engine reports.
+  The driver's own header admits "matching of solutions is not yet perfected".
+- **`char_code(A, 163)`** is a text-encoding artifact of a Latin-1 file from
+  1999; the answer is correct.
+- **`catch-and-throw`** expects an uncaught ball to surface as `system_error`.
+  This engine propagates the ball. Driver-dependent rather than clearly wrong.
+- **`current_prolog_flag(debug, off)`**, twice, appears only in `-debug` runs —
+  the CLI flag sets the Prolog flag. Not a defect, and the reason the two runs
+  have to be compared in the same mode.
+
+### What to do with this
+
+Nothing here is urgent — 414 of 420 with four built-ins deviating is a good
+showing for an engine of this size, and the six are narrow. The
+`number_chars/number_codes` one is worth fixing: it is small, it is
+unambiguous, and "the answer depends on how you wrote the number" is the kind of
+defect that surfaces as an inexplicable failure years later.
+
+The more useful conclusion is about method. Run this before believing any
+conformance claim made from `test/resources/iso` alone.
 
 ---
 
