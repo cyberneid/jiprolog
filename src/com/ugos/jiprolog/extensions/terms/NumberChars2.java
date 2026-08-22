@@ -30,110 +30,34 @@ public class NumberChars2 extends JIPXCall
     public final boolean unify(final JIPCons input, Hashtable<JIPVariable, JIPVariable> varsTbl)
     {
         JIPTerm number = input.getNth(1);
-        JIPTerm chars  = input.getNth(2);
+        JIPTerm chars = input.getNth(2);
 
-        // check if input is a variable
-        if (number instanceof JIPVariable)
-        {
-            // try to extract the term
-            if(((JIPVariable)number).isBounded())
-            {
-                //extracts the term
-                number = ((JIPVariable)number).getValue();
-            }
-        }
+        if(number instanceof JIPVariable && ((JIPVariable)number).isBounded())
+            number = ((JIPVariable)number).getValue();
 
-        if (number instanceof JIPNumber)
-        {
-            String strNumber;
-            if(((JIPNumber)number).isInteger())
-                strNumber = Integer.toString((int)((JIPNumber)number).getDoubleValue());
-            else
-                strNumber = Double.toString(((JIPNumber)number).getDoubleValue());
+        if(chars instanceof JIPVariable && ((JIPVariable)chars).isBounded())
+            chars = ((JIPVariable)chars).getValue();
 
-            number = JIPString.create(strNumber, true);
-        }
-        else if (number instanceof JIPVariable)
-        {
-        	// means number unbounded
-            if (chars instanceof JIPVariable)
-            {
-                if (((JIPVariable)chars).isBounded())
-                {
-                    chars = ((JIPVariable)chars).getValue();
-                }
-                else
-                {
-                    throw new JIPInstantiationException(2);
-                }
-            }
+        // ISO 8.16.4.1: quando la lista c'e' tutta e' lei a decidere - si
+        // analizza e il numero si unifica col risultato. Rendere il numero nel
+        // proprio testo canonico e' l'altra direzione, e vale solo quando la
+        // lista non c'e' ancora.
+        //
+        // Erano invertite: col numero legato si generava sempre il canonico e
+        // lo si confrontava, quindi number_chars(3.3, ['3','.','3']) riusciva
+        // e lo stesso numero scritto ['3','.','3','E','+','0'] falliva.
+        final String strText = NumberText.textOf(chars, true);
 
-            if(chars == JIPList.NIL)
-            {
-                throw new JIPSyntaxErrorException("not_a_number");
-            }
-            else if (chars instanceof JIPList)
-            {
-				try
-				{
+        if(strText != null)
+            return number.unify(NumberText.parse(strText), varsTbl);
 
-                	String strVal;
-                	if (chars instanceof JIPList)
-    					strVal = (JIPString.create((JIPList)chars, true)).getStringValue();
-                	else if (chars instanceof JIPString)
-                		strVal = ((JIPString)chars).getStringValue();
-                	else
-                        throw new JIPTypeException(JIPTypeException.LIST, chars);
+        if(number instanceof JIPNumber)
+            return NumberText.render((JIPNumber)number, true).unify(chars, varsTbl);
 
-					// remove leading whitespace
-					strVal = strVal.replaceAll("^\\s+", "");
+        if(number instanceof JIPVariable)
+            throw new JIPInstantiationException(2);
 
-					// trailing whitespace is considered a syntax error
-					if(strVal.length() != strVal.replaceAll("\\s+$", "").length())
-					     throw new JIPSyntaxErrorException("not_a_number");
-
-//                	if(strVal.startsWith("0''") && strVal.length() > 3)
-//                	      chars = JIPNumber.create(strVal.codePointAt(3));
-//                	else if(strVal.startsWith("0\'") && strVal.length() > 3)
-//              	      chars = JIPNumber.create(strVal.codePointAt(2));
-//                	else
-                		if(strVal.startsWith("0'"))
-						chars = JIPNumber.create(strVal.codePointAt(2));
-                	else if(strVal.startsWith("0x"))
-                		chars = JIPNumber.create(Integer.parseInt(strVal.substring(2), 16));
-                	else if(strVal.startsWith("0o"))
-                    		chars = JIPNumber.create(Integer.parseInt(strVal.substring(2), 8));
-                	else if(strVal.startsWith("0b"))
-                		chars = JIPNumber.create(Integer.parseInt(strVal.substring(2), 2));
-
-//					// trailing non numeric leftovers is a syntax error
-//					if(chars.length() != strVal.length())
-//		                throw new JIPSyntaxErrorException("not_a_number");
-
-                	else
-                	{
-	                	Double d = Double.parseDouble(strVal);
-	                	if(strVal.contains("."))
-	                		chars = JIPNumber.create(d);
-	                	else
-	                		chars = JIPNumber.create(d.intValue());
-                	}
-            	}
-				catch (NumberFormatException e) {
-	                throw new JIPSyntaxErrorException("not_a_number");
-				}
-            }
-            else
-            {
-                throw new JIPTypeException(JIPTypeException.LIST, chars);
-            }
-        }
-        else
-        {
-            throw new JIPTypeException(JIPTypeException.NUMBER, number);
-        }
-
-        return number.unify(chars, varsTbl);
+        throw new JIPTypeException(JIPTypeException.NUMBER, number);
     }
 
     public boolean hasMoreChoicePoints()

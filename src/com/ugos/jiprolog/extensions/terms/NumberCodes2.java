@@ -30,100 +30,34 @@ public class NumberCodes2 extends JIPXCall
     public final boolean unify(final JIPCons input, Hashtable<JIPVariable, JIPVariable> varsTbl)
     {
         JIPTerm number = input.getNth(1);
-        JIPTerm codes  = input.getNth(2);
+        JIPTerm codes = input.getNth(2);
 
-        // check if input is a variable
-        if (number instanceof JIPVariable)
-        {
-            // try to extract the term
-            if(((JIPVariable)number).isBounded())
-            {
-                //extracts the term
-                number = ((JIPVariable)number).getValue();
-            }
-        }
+        if(number instanceof JIPVariable && ((JIPVariable)number).isBounded())
+            number = ((JIPVariable)number).getValue();
 
-        if (number instanceof JIPNumber)
-		{
-	            String strNumber;
-	            if(((JIPNumber)number).isInteger())
-	                strNumber = Integer.toString((int)((JIPNumber)number).getDoubleValue());
-	            else
-	                strNumber = Double.toString(((JIPNumber)number).getDoubleValue());
+        if(codes instanceof JIPVariable && ((JIPVariable)codes).isBounded())
+            codes = ((JIPVariable)codes).getValue();
 
-	            number = JIPString.create(strNumber, false);
-	    }
-        else if (number instanceof JIPVariable)
-        {
-        	// means number unbounded
-            if (codes instanceof JIPVariable)
-            {
-                if (((JIPVariable)codes).isBounded())
-                {
-                    codes = ((JIPVariable)codes).getValue();
-                }
-                else
-                {
-                    throw new JIPInstantiationException(2);
-                }
-            }
+        // ISO 8.16.4.2: quando la lista c'e' tutta e' lei a decidere - si
+        // analizza e il numero si unifica col risultato. Rendere il numero nel
+        // proprio testo canonico e' l'altra direzione, e vale solo quando la
+        // lista non c'e' ancora.
+        //
+        // Erano invertite: col numero legato si generava sempre il canonico e
+        // lo si confrontava, quindi number_codes(3.3, "3.3") riusciva
+        // e lo stesso numero scritto "3.3E+0" falliva.
+        final String strText = NumberText.textOf(codes, false);
 
-            if(codes == JIPList.NIL)
-            {
-                throw new JIPSyntaxErrorException("not_a_number");
-            }
-            else
-            {
-            	String strVal;
-            	if (codes instanceof JIPList)
-					strVal = (JIPString.create((JIPList)codes, false)).getStringValue();
-            	else if (codes instanceof JIPString)
-            		strVal = ((JIPString)codes).getStringValue();
-            	else
-                    throw new JIPTypeException(JIPTypeException.LIST, codes);
+        if(strText != null)
+            return number.unify(NumberText.parse(strText), varsTbl);
 
-				try
-				{
-					// remove leading whitespace
-					strVal = strVal.replaceAll("^\\s+", "");
+        if(number instanceof JIPNumber)
+            return NumberText.render((JIPNumber)number, false).unify(codes, varsTbl);
 
-					// trailing whitespace is considered a syntax error
-					if(strVal.length() != strVal.replaceAll("\\s+$", "").length())
-					    throw new JIPSyntaxErrorException("not_a_number");
+        if(number instanceof JIPVariable)
+            throw new JIPInstantiationException(2);
 
-//                	if(strVal.startsWith("0''") && strVal.length() > 3)
-//                		codes = JIPNumber.create(strVal.codePointAt(3));
-//                	else if(strVal.startsWith("0\'") && strVal.length() > 3)
-//                		codes = JIPNumber.create(strVal.codePointAt(3));
-//                	else
-               		if(strVal.startsWith("0'"))
-						codes = JIPNumber.create(strVal.codePointAt(2));
-                	else if(strVal.startsWith("0x"))
-                		codes = JIPNumber.create(Integer.parseInt(strVal.substring(2), 16));
-                	else if(strVal.startsWith("0o"))
-                		codes = JIPNumber.create(Integer.parseInt(strVal.substring(2), 8));
-                	else if(strVal.startsWith("0b"))
-                		codes = JIPNumber.create(Integer.parseInt(strVal.substring(2), 2));
-                	else
-                	{
-	                	Double d = Double.parseDouble(strVal);
-	                	if(strVal.contains("."))
-	                		codes = JIPNumber.create(d);
-	                	else
-	                		codes = JIPNumber.create(d.intValue());
-                	}
-            	}
-				catch (NumberFormatException e) {
-	                throw new JIPSyntaxErrorException("not_a_number");
-				}
-            }
-        }
-        else
-        {
-            throw new JIPTypeException(JIPTypeException.NUMBER, number);
-        }
-
-        return number.unify(codes, varsTbl);
+        throw new JIPTypeException(JIPTypeException.NUMBER, number);
     }
 
     public boolean hasMoreChoicePoints()

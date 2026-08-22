@@ -104,7 +104,7 @@ if you care to keep it accurate.
 - `ResolutionTest` — unification, backtracking and cut, including whole
   programs checked against independently known answers (six queens has four
   solutions, `tak(14,10,4)` is 5). The slowest class in the suite at ~13 s.
-- `IsoConformanceTest` — runs the 441-case suite in `test/resources/iso/`.
+- `IsoConformanceTest` — runs the 465-case suite in `test/resources/iso/`.
 
 Tests run against the **release** kernel (no `JIPDebugger.debug`), so the suite
 also proves the bootstrap produced a loadable kernel. Surefire uses
@@ -147,7 +147,7 @@ either a regression or a real deviation — the latter belongs in
 `CODE_REVIEW.md` with the case annotated, not quietly deleted.
 
 Caveat, now measured rather than suspected: these cases were written against
-this implementation by the same hand, so 441/441 is a weak signal. The
+this implementation by the same hand, so 465/465 is a weak signal. The
 independent INRIA suite says so — see the next section.
 
 ### The INRIA suite
@@ -158,18 +158,20 @@ mvn package && tools/run-inriasuite.sh
 
 Fetches the 1999 INRIA conformance suite into `target/` (gitignored — it is
 third-party material with no stated licence, and is deliberately **not**
-vendored) and runs it. **420 cases, 12 flagged, six of them real**: `number_chars/2`
-and `number_codes/2` do not parse a bound number's text, `call/1` reports the
-offending subterm rather than the whole goal as the `type_error` culprit, and
-`bagof/setof` disagree on `^/2` nested in a disjunction. `CODE_REVIEW.md` §21
-has the full classification and which six are artifacts of the suite.
+vendored) and runs it. **420 cases, 10 flagged, five of them real**: `call/1` reports the offending
+subterm rather than the whole goal as the `type_error` culprit, and `bagof/setof`
+disagree on `^/2` nested in a disjunction. `CODE_REVIEW.md` §21 has the full
+classification and which of them are artifacts of the suite; §22 is the one that
+has been fixed since — `number_chars/2` and `number_codes/2` did not parse a
+bound number's text.
 
 Not part of `mvn verify`: it needs the network, it is not green, and the build
 must not depend on a 27-year-old tarball staying reachable.
 
-Worth knowing before quoting any conformance number: this work took the suite in
-`test/resources/iso` from nothing to 441 green cases, and moved the INRIA score
-by **zero**. The two suites do not overlap.
+Worth knowing before quoting any conformance number: the review work took the
+suite in `test/resources/iso` from nothing to 441 green cases and moved the INRIA
+score by **zero**. The two suites barely overlap, and the only INRIA finding
+fixed so far (§22) was one this project's own suite had nothing to say about.
 
 ## Architecture
 
@@ -343,6 +345,14 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
   kernel or the library sources. A dirty `target/` keeps the previous build's
   `.jip` files, and the tests will happily pass against a kernel the current
   sources can no longer produce. `CODE_REVIEW.md` §20.
+- `number_chars/2` and `number_codes/2` **parse the list when it is there** and
+  only render the canonical text when it is not (ISO 8.16.4.1), and the decimal
+  branch is matched against the ISO number-token grammar rather than handed to
+  `Double.parseDouble`. Both were wrong; see `CODE_REVIEW.md` §22. One
+  consequence to know: `1e5` is not an ISO number token, so
+  `atom_number('1e5', N)` now fails — while **the reader still accepts `1e5`**,
+  as integer 100000. That divergence is deliberate and the reader is where it
+  should be fixed.
 - Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
   past it with `evaluation_error(int_overflow)`. That is the limit of the
   `double` the value is held in, so it is a real boundary, not an arbitrary

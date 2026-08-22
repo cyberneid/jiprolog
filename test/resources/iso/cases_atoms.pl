@@ -47,3 +47,44 @@ iso('8.16.7', number_chars(_, _),                       error(instantiation_erro
 iso('8.16.8', (number_codes(33, L), L == [0'3, 0'3]),   success).
 iso('8.16.8', (number_codes(N, [0'3, 0'3]), N == 33),   success).
 iso('8.16.8', number_codes(_, _),                       error(instantiation_error)).
+
+% --- number_chars/2 e number_codes/2 col numero gia' legato -----------------
+% ISO 8.16.4.1: quando la lista c'e', si analizza e il numero si unifica col
+% risultato. Andava nell'altra direzione - rendeva il numero nel suo testo
+% canonico e confrontava - quindi lo stesso numero riusciva o falliva secondo
+% come lo si era scritto. Ogni caso qui sotto e' una scrittura non canonica.
+iso('8.16.7', number_chars(3.3, ['3', '.', '3']),                        success).
+iso('8.16.7', number_chars(3.3, ['3', '.', '3', 'E', '+', '0']),         success).
+iso('8.16.7', number_chars(4.2, ['4', '2', '.', '0', 'e', '-', '1']),    success).
+iso('8.16.7', number_chars(33, [' ', '3', '3']),                         success).
+iso('8.16.7', number_chars(15, ['0', 'x', 'f']),                         success).
+iso('8.16.7', number_chars(65, ['0', '''', 'A']),                        success).
+iso('8.16.7', number_chars(-25, ['-', '2', '5']),                        success).
+iso('8.16.8', number_codes(33.0, [0'3, 0'., 0'3, 0'E, 0'+, 0'0, 0'1]),   success).
+iso('8.16.8', number_codes(15, [0'0, 0'x, 0'f]),                         success).
+
+% --- e la stessa lista letta all'indietro da' lo stesso numero -------------
+iso('8.16.7', (number_chars(N, ['3', '.', '3', 'E', '+', '0']), N == 3.3),  success).
+iso('8.16.7', (number_chars(N, ['0', 'x', 'f']), N == 15),                  success).
+iso('8.16.7', (number_chars(N, ['0', 'o', '1', '7']), N == 15),             success).
+iso('8.16.7', (number_chars(N, ['0', 'b', '1', '0', '1']), N == 5),         success).
+iso('8.16.7', (number_chars(N, ['\n', ' ', '3']), N == 3),                  success).
+
+% --- cio' che non e' un token numerico ISO e' un errore di sintassi --------
+% Il ramo decimale usava Double.parseDouble, che accetta la sintassi dei
+% letterali Java: 3d valeva 3, 3.3f valeva 3.3, Infinity valeva 2147483647 e
+% NaN valeva 0.
+iso('6.4.4', number_chars(_, ['3', 'd']),                                error(syntax_error(_))).
+iso('6.4.4', number_chars(_, ['3', '.', '3', 'f']),                      error(syntax_error(_))).
+iso('6.4.4', number_chars(_, ['I', 'n', 'f', 'i', 'n', 'i', 't', 'y']),  error(syntax_error(_))).
+iso('6.4.4', number_chars(_, ['N', 'a', 'N']),                           error(syntax_error(_))).
+% un float vuole cifre da entrambi i lati del punto
+iso('6.4.4', number_chars(_, ['.', '3']),                                error(syntax_error(_))).
+iso('6.4.4', number_chars(_, ['3', '.']),                                error(syntax_error(_))).
+% layout in coda
+iso('8.16.7', number_chars(_, ['3', ' ']),                               error(syntax_error(_))).
+iso('6.4.4', number_chars(_, ['0', 'x', 'g']),                           error(syntax_error(_))).
+iso('6.4.4', number_chars(_, ['0', 'o', '9']),                           error(syntax_error(_))).
+
+% --- generazione: gli interi grandi non vengono troncati a 32 bit ----------
+iso('8.16.7', (number_chars(3000000000, L), L == ['3','0','0','0','0','0','0','0','0','0']),  success).

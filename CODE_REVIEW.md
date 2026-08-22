@@ -45,10 +45,11 @@ accumulated infrastructure debt.
 
 **Status.** §14 (build and CI) is done: the project builds with Maven, produces
 a working jar, and runs its tests on four JDK/OS combinations. The independent
-INRIA suite runs too (§21): 420 cases, six real deviations, and a score this
-work did not move. §1, §2, §4, §5,
-§9, §10, §15, §16, §17, §19, §20 and the two resolved bullets of §12 are fixed;
-§3 all but the built-in table. 99 tests and a 441-case conformance suite, none
+INRIA suite runs too (§21): 420 cases, six real deviations, and a score the
+review work had not moved. One of the six is now fixed (§22) and it is down to
+five. §1, §2, §4, §5,
+§9, §10, §15, §16, §17, §19, §20, §22 and the two resolved bullets of §12 are
+fixed; §3 all but the built-in table. 99 tests and a 465-case conformance suite, none
 disabled. What remains is §11 (error handling and resource management), §13
 (maintainability) and §18, plus the deeper items §10 lists as still open.
 
@@ -1344,10 +1345,10 @@ difference is §17 — the suite's own output is now correctly bracketed.)
 
 ### The six real ones
 
-**`number_chars/2` and `number_codes/2` do not parse when the number is bound.**
-The clearest of the six, and the best characterised. ISO 8.16.4.1 says the list
-is parsed and the resulting number unified. This implementation instead renders
-the number to its canonical text and compares:
+**~~`number_chars/2` and `number_codes/2` do not parse when the number is
+bound.~~ Fixed — see §22.** The clearest of the six, and the best characterised.
+ISO 8.16.4.1 says the list is parsed and the resulting number unified. This
+implementation instead rendered the number to its canonical text and compared:
 
 ```prolog
 ?- number_chars(X, ['3','.','3','E','+','0']).    X = 3.3.        % parsing works
@@ -1399,14 +1400,85 @@ It needs checking against the corrigenda before anyone changes code for it.
 
 ### What to do with this
 
-Nothing here is urgent — 414 of 420 with four built-ins deviating is a good
-showing for an engine of this size, and the six are narrow. The
-`number_chars/number_codes` one is worth fixing: it is small, it is
-unambiguous, and "the answer depends on how you wrote the number" is the kind of
-defect that surfaces as an inexplicable failure years later.
+Nothing here was urgent — 414 of 420 with four built-ins deviating is a good
+showing for an engine of this size, and the six are narrow.
+`number_chars/number_codes` is now fixed (§22), taking the suite to **10
+flagged**; the rest stand.
 
 The more useful conclusion is about method. Run this before believing any
 conformance claim made from `test/resources/iso` alone.
+
+---
+
+## 22. ~~Medium — `number_chars/2` and `number_codes/2` never parse a given list~~
+
+**Fixed**, and found by §21's independent suite rather than by this project's own.
+
+ISO 8.16.4.1 is directional: when the list is there, it is *parsed* and the
+number unified with the result. Rendering the number to text is the other
+direction, and it only applies when there is no list yet. `NumberChars2` and
+`NumberCodes2` had it backwards — with the number bound they always rendered the
+canonical text and compared strings — so the same number succeeded or failed
+depending on how it had been written:
+
+```prolog
+?- number_chars(X, ['3','.','3','E','+','0']).    X = 3.3.     % parsing worked
+?- number_chars(3.3, ['3','.','3','E','+','0']).  false.       % same number
+?- number_chars(3.3, ['3','.','3']).              true.        % canonical only
+?- number_chars(33,  [' ','3','3']).              false.
+?- number_chars(15,  ['0','x','f']).              false.
+```
+
+### Flipping it exposed a second defect
+
+The parse branch used `Double.parseDouble`, which implements *Java literal*
+syntax. That had been unreachable with the number bound, and nobody writing the
+list by hand writes `3d`, so it went unnoticed:
+
+| list | was | ISO 6.4.4 |
+|---|---|---|
+| `3d` | 3 | not a number (`d` is a Java suffix) |
+| `3.3f` | 3.3 | not a number |
+| `Infinity` | 2147483647 | not a number |
+| `NaN` | 0 | not a number |
+| `.3`, `3.` | 0.3, 3.0 | a float needs digits on both sides |
+
+Fixing only the direction would have turned these from *failing* into
+*succeeding*, which is worse. So the decimal branch is now matched against the
+ISO number-token grammar before being parsed. The radix forms — `0x`, `0o`,
+`0b`, `0'c` — were already correct and are unchanged, except that they now
+reject bad digits (`0xg`) and use `long` rather than `int`.
+
+Delegating the whole job to `JIPTermParser.parseTerm` was tried first and
+rejected: it does not recognise the radix notations, reading `"0xf"` as `0` and
+`"0o17"` as `17`. Caught by re-running the same probes rather than by reading.
+
+### One deliberate behaviour change
+
+`number_chars(N, ['1','e','5'])` now raises `syntax_error(not_a_number)` where
+it gave `N = 100000`, and `atom_number('1e5', N)` fails where it succeeded. An
+exponent without a fractional part is not an ISO number token, and yielding an
+*integer* from one is doubly wrong.
+
+This does leave a divergence: **the reader still accepts `1e5`, as integer
+100000**. `.3` and `3.` it already rejects, so the tightening agrees with it
+everywhere else. Baking the reader's leniency into a second place would have
+made it harder to fix; the reader is where it belongs, and it is not fixed here.
+
+### Measured
+
+- The INRIA suite goes from 12 flagged goals to **10**: `number_chars` and
+  `number_codes` leave the list entirely.
+- `test/resources/iso` grows 441 → 465 cases. **Fourteen of the new ones fail
+  against the previous commit**, in both directions — seven that should now
+  succeed and seven that should now be syntax errors. The canonical-form cases
+  pass on both builds and are the guard against over-correcting.
+- 25 runtime goals and the 1203-term parse corpus are identical before and
+  after. `atom_number/2`, which goes through `number_codes/2`, is unchanged on
+  every input except `1e5`.
+- A latent truncation went with it: the canonical text came from
+  `Integer.toString((int) value)`, so `number_chars(3000000000, L)` gave a
+  negative number's digits. It is `long` now, per §9's rule.
 
 ---
 
