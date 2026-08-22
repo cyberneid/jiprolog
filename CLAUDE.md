@@ -93,7 +93,7 @@ if you care to keep it accurate.
   the database, lists.
 - `ParserTest` — operator precedence and associativity, asserted through
   `write_canonical/1`. This is the regression net for `PrologParser`;
-  `OperatorAsOperand` is §19's half of it.
+  `OperatorAsOperand` and `PriorityClash` are §19's half of it.
 - `ConcurrencyTest` — four threads, one engine each. This is the harness for the
   shared-static work; every one of its tests fails against the pre-fix sources.
 - `DcgTest`, `ListenerApiTest`, `ReflectionHandleTest` — the areas fixed in
@@ -307,11 +307,18 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
   regression net; if you touch `PrettyPrinter`, its round-trip test is the one
   that matters. Use `write_canonical/1` or `=../2` anyway when debugging the
   parser: it shows the structure without depending on the operator table.
-- The parser groups by operator priority but does not **enforce** it: it accepts
-  `a ; dynamic + b`, where `dynamic` at 1150 sits under `;` at 1100. Enforcing
-  it is blocked on the kernel, which writes `'$system': \+ G :- ...` — `\+` at
-  900 under `:` at 600 — so the rule would reject `jipkernel.txt` at bootstrap.
-  See `CODE_REVIEW.md` §19, which has the measurements.
+- The parser enforces operand priority (ISO 6.3.4) and raises
+  `syntax_error(operator_priority_clash(Op))` when a subterm binds more loosely
+  than its position allows — `a ; dynamic + b`, with `dynamic` at 1150 under `;`
+  at 1100. `CODE_REVIEW.md` §19 has the measurements. Two things are load
+  bearing:
+  - **`m_priorityZero`** records terms that are priority 0 whatever their
+    functor says — bracketed (6.3.4.1) and functional-notation (6.3.3). Without
+    it the check rejects `EOS = (not)` in `xio.pl` and every
+    `'$system': @>(X, Y)` in the kernel.
+  - **The kernel must not write `Module: \+ Goal`** with the operator. `:` is
+    `600 xfy` and `\+ G` is 900. Use the functional notation the rest of
+    `jipkernel.txt` uses — `'$system': \+(G)` — which is the same term.
 - **Run `mvn clean verify`, not `mvn verify`,** after touching the parser, the
   kernel or the library sources. A dirty `target/` keeps the previous build's
   `.jip` files, and the tests will happily pass against a kernel the current

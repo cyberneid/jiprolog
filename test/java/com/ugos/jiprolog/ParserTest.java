@@ -19,11 +19,14 @@
 package com.ugos.jiprolog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import com.ugos.jiprolog.engine.JIPSyntaxErrorException;
 
 /**
  * Operator parsing, asserted through write_canonical/1 so that the operator
@@ -265,4 +268,36 @@ public class ParserTest extends PrologTestBase
         }
     }
 
+    /**
+     * The other half of the same rule: a term too loose for its position is a
+     * syntax error, not something to build anyway.
+     */
+    @Nested
+    @DisplayName("an operand above the priority its position allows")
+    public class PriorityClash extends PrologTestBase
+    {
+        private void rejects(String term)
+        {
+            // dynamic and spy are 1150 fx, above the 1100 that the right of
+            // ;/2 allows and the 1000 that the right of ','/2 allows
+            assertThrows(JIPSyntaxErrorException.class, () -> engine.getTermParser().parseTerm(term));
+        }
+
+        @Test
+        @DisplayName("is refused rather than built")
+        public void refused()
+        {
+            rejects("a ; dynamic + b");
+            rejects("a , dynamic - b");
+            rejects("a -> dynamic + b");
+        }
+
+        @Test
+        @DisplayName("but brackets make it legal again")
+        public void bracketsMakeItLegal()
+        {
+            assertEquals(";(a,dynamic(+(b)))", canonical("a ; (dynamic + b)"));
+            assertEquals("','(a,dynamic(-(b)))", canonical("a , (dynamic - b)"));
+        }
+    }
 }

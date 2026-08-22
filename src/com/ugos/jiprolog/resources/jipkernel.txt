@@ -10,11 +10,14 @@
  *
  */
 
-'$system': \+ G :- call(G), !, fail.
-'$system': \+ G.
+% Notazione funzionale, come per ->/2 e @>/2 qui sotto, e non '$system': \+ G:
+% ':' e' dichiarato 600 xfy, quindi a destra ammette 600, mentre \+ G scritto
+% con l'operatore vale 900. Il termine e' lo stesso; e' la scrittura che sfora.
+'$system': \+(G) :- call(G), !, fail.
+'$system': \+(G).
 
-'$system': not G :- call(G), !, fail.
-'$system': not G.
+'$system': not(G) :- call(G), !, fail.
+'$system': not(G).
 
 '$system': ->(X,Y) :- call(X), !, '$!!'(Y).
 '$system': *->(X,Y) :- call(X), '$!!'(Y).
