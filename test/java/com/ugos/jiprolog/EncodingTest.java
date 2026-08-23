@@ -19,6 +19,7 @@
 package com.ugos.jiprolog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -28,6 +29,8 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import com.ugos.jiprolog.engine.JIPRepresentationException;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -148,6 +151,75 @@ public class EncodingTest extends PrologTestBase
             String path = data.getAbsolutePath().replace('\\', '/');
             assertEquals("[99,97,102,102,232,32,8364]",
                     valueOf("leggi('" + path + "', Cs)", "Cs"));
+        }
+    }
+
+    @Nested
+    @DisplayName("a character code")
+    class CodeRange
+    {
+        @Test
+        @DisplayName("may be any code point, not just a byte")
+        public void aboveByteRange()
+        {
+            // the range check was 0..255, so the engine could hold a character
+            // it could not construct: atom_chars accepted '€' and atom_codes
+            // gave 8364 back, while atom_codes(A, [8364]) raised
+            // representation_error(character_code)
+            assertEquals("1", valueOf("atom_codes(A, [8364]), atom_length(A, N)", "N"));
+            assertEquals("1", valueOf("atom_codes(A, [256]), atom_length(A, N)", "N"));
+            assertEquals("[8364]", valueOf("char_code(C, 8364), atom_codes(C, L)", "L"));
+        }
+
+        @Test
+        @DisplayName("round-trips through atom_codes and atom_chars alike")
+        public void agreesWithItself()
+        {
+            assertEquals("[8364]", valueOf("atom_codes(A, [8364]), atom_codes(A, L)", "L"));
+            assertEquals("[945,946]", valueOf("atom_codes(A, [945,946]), atom_codes(A, L)", "L"));
+        }
+
+        @Test
+        @DisplayName("is still refused when it is not a code point at all")
+        public void stillRejectsNonsense()
+        {
+            assertThrows(JIPRepresentationException.class,
+                    () -> succeeds("atom_codes(_, [-1])"));
+            assertThrows(JIPRepresentationException.class,
+                    () -> succeeds("atom_codes(_, [1114112])"));
+        }
+    }
+
+    @Nested
+    @DisplayName("what the engine writes")
+    class Output
+    {
+        @Test
+        @DisplayName("comes back as the characters it was given")
+        public void roundTripsThroughText() throws Exception
+        {
+            consultUtf8("scrivi :- atom_codes(A, [99,97,102,102,232,32,8364]), write(A).\n");
+
+            // captureOutput decodes the engine's bytes; it used to do that as
+            // ISO-8859-1 while the engine wrote UTF-8, which turned every
+            // non-ASCII assertion into a silent mismatch
+            assertEquals("caff\u00e8 \u20ac", captureOutput("scrivi"));
+        }
+
+        @Test
+        @DisplayName("survives a full write-then-read round trip")
+        public void roundTripsThroughAFile() throws Exception
+        {
+            File data = new File(tempDir, "round.txt");
+            String path = data.getAbsolutePath().replace('\\', '/');
+
+            consult("scrivi(F) :- open(F, write, S), atom_codes(A, [232,32,8364]), write(S, A), close(S).\n"
+                  + "rileggi(F, Cs) :- open(F, read, S), leggi(S, Cs), close(S).\n"
+                  + "leggi(S, [C|Cs]) :- get_code(S, C), C =\\= -1, !, leggi(S, Cs).\n"
+                  + "leggi(_, []).\n");
+
+            assertEquals("[232,32,8364]",
+                    valueOf("scrivi('" + path + "'), rileggi('" + path + "', Cs)", "Cs"));
         }
     }
 

@@ -26,6 +26,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import org.junit.jupiter.api.DisplayName;
@@ -77,7 +78,7 @@ public class IsoConformanceTest extends PrologTestBase
             assertNotNull(in, resource + " is missing from the test classpath");
             try
             {
-                engine.consultStream(new InputStreamReader(in, "ISO-8859-1"), resource);
+                engine.consultStream(new InputStreamReader(in, StandardCharsets.UTF_8), resource);
             }
             finally
             {

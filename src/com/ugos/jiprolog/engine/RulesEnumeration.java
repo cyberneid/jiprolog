@@ -68,7 +68,7 @@ final class RulesEnumeration extends Object implements Enumeration<PrologRule>
 
 	// per evitare choice-points che eseguendo un look-haed
 	// non sarebbero presenti.
-    // Manca però il metodo per riusare il nextElement della enumeration
+    // Manca perÃ² il metodo per riusare il nextElement della enumeration
 //    public boolean isNextUnifiable(PrologObject obj)
 //    {
 //        boolean bUnify = false;

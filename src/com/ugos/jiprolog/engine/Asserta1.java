@@ -30,7 +30,7 @@ final class Asserta1 extends Assert1
         if(clause.getModuleName().equals(GlobalDB.USER_MODULE))
             clause.setModuleName(getWAM().m_curNode.m_strModule);
 
-        // non è possibile asserire nel modulo system
+        // non Ã¨ possibile asserire nel modulo system
         if(clause.getModuleName().equals(GlobalDB.SYSTEM_MODULE))
             clause.setModuleName(GlobalDB.USER_MODULE);
 

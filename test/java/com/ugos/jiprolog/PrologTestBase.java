@@ -141,7 +141,9 @@ public abstract class PrologTestBase
 
         try
         {
-            return captured.toString("ISO-8859-1").trim();
+            // UTF-8, come scrive il motore: decodificare qui in Latin-1
+            // spezzerebbe ogni asserzione su testo non ASCII, e in silenzio.
+            return captured.toString("UTF-8").trim();
         }
         catch (UnsupportedEncodingException cannotHappen)
         {

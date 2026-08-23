@@ -58,7 +58,7 @@ class WAMTrace extends WAM
                 do
                 {
                     // Azzera le variabili eventualmente istanziate al livello corrente
-                    // poichÈ in hasMoreElements viene riprovato il match
+                    // poich√© in hasMoreElements viene riprovato il match
                     curNode.clearVariables();
 
                     // call precedente
@@ -102,7 +102,7 @@ class WAMTrace extends WAM
             else if(curNode.m_ruleEnum.hasMoreElements())
             {
                 // se la prossima regola unificante fallisce nel corpo qui non
-                // Ë possibile accorgersene (il risultato cioË non Ë deterministico)
+                // √® possibile accorgersene (il risultato cio√® non √® deterministico)
                 // quindi hasMoreElement ritorna true
                 // occorrerebbe eseguire un look-haed per verificare se la prossima
                 // regola unifica
@@ -138,7 +138,7 @@ class WAMTrace extends WAM
 	                bUnify = false;
 
 	                // genera le clausole che unificano
-	                // se le clausole sono state gi‡ generate siamo in backtracking
+	                // se le clausole sono state gi√† generate siamo in backtracking
 	                // altrimenti ne genera di nuove
 	                if(curNode.m_ruleEnum == null)
 	                {
@@ -151,8 +151,8 @@ class WAMTrace extends WAM
 //	                    	ex.printStackTrace();
 //	                    	ex.printPrologStackTrace();
 
-	                        // invia il warning se il predicato non Ë definito
-	                        // e non Ë dynamic
+	                        // invia il warning se il predicato non √® definito
+	                        // e non √® dynamic
 	                        // in questo caso la enumeration deve essere vuota
 	                        if(!m_globalDB.isDynamic(((Functor)ex.getCulprit()).getName()))
 	                        {
@@ -311,7 +311,7 @@ class WAMTrace extends WAM
                 final Clause cla = ((Clause)rule.m_dbCons);
                 if(cla != null)
                 {
-                    ex.m_strFileName = cla.getFileName(); // nel caso di built-in non Ë valorizzato
+                    ex.m_strFileName = cla.getFileName(); // nel caso di built-in non √® valorizzato
                     ex.m_nLineNumber = cla.getLine();
                     ex.m_nPosition = cla.getPosition();
                 }
@@ -336,7 +336,7 @@ class WAMTrace extends WAM
 //                final Clause cla = ((Clause)rule.m_dbCons);
 //                if(cla != null)
 //                {
-//                    ex.m_strFileName = cla.getFileName();  // nel caso di built-in non Ë valorizzato
+//                    ex.m_strFileName = cla.getFileName();  // nel caso di built-in non √® valorizzato
 //                    ex.m_nLineNumber = cla.getLineNumber();
 //                    ex.m_nPosition   = cla.getPosition();
 //                }

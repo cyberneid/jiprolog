@@ -84,13 +84,16 @@ final class PString extends List //implements Serializable
                     throw new JIPTypeException(JIPTypeException.INTEGER, head);
                 }
 
-                int nAscii = (int)ascii.getValue();
+                int nCodePoint = (int)ascii.getValue();
 
-                if(nAscii < 0 || nAscii > 255)
+                // Il limite era 255 - un byte - quindi atom_codes(A, [8364])
+                // dava representation_error mentre atom_chars con lo stesso
+                // carattere passava e atom_codes ne restituiva 8364. Si poteva
+                // leggere un carattere che non si poteva costruire.
+                if(!Character.isValidCodePoint(nCodePoint))
                 	throw new JIPRepresentationException("character_code");
-//                	throw new JIPTypeException(JIPTypeException.INTEGER, head);
 
-                m_strString += String.valueOf((char)nAscii);
+                m_strString += new String(Character.toChars(nCodePoint));
             }
             else if (head instanceof Atom)
             {
@@ -99,14 +102,14 @@ final class PString extends List //implements Serializable
 
             	String a = ((Atom)head).getName();
 
-            	if(a.length() > 1)
+            	// codePointCount e non length: un carattere fuori dal BMP occupa
+            	// due char in Java e non per questo e' due caratteri.
+            	if(a.codePointCount(0, a.length()) > 1)
             	{
             		throw new JIPTypeException(JIPTypeException.INTEGER, head);
             	}
 
-            	char code = a.charAt(0);
-
-                m_strString += String.valueOf(code);
+                m_strString += a;
             }
             else
             {

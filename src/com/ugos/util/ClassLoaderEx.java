@@ -67,7 +67,7 @@ public class ClassLoaderEx extends ClassLoader
         
         try
         {
-        //Debug cerca la classe se gi‡ caricata
+        //Debug cerca la classe se gi√† caricata
             classClass = findLoadedClassEx(nameClass);
         }
         catch(ClassNotFoundException cnfe)

@@ -32,7 +32,7 @@ final class AsyncWAMManager implements Runnable
 
     //private boolean               m_bDeterministc;
 
-    // il container può trovarsi in due stati:
+    // il container puÃ² trovarsi in due stati:
     // running se m_workerThread != null
     // waiting se m_workerThread == null
 
@@ -111,7 +111,7 @@ final class AsyncWAMManager implements Runnable
     {
         if(m_wam.isNeverRun())
         {
-            return true;  // qui è tutto pronto per partire
+            return true;  // qui Ã¨ tutto pronto per partire
         }
         else if (m_wam.isClosed())
         {

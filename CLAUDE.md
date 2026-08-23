@@ -26,17 +26,18 @@ java -jar target/jiprolog-4.1.7.1.jar -c yourfile.pl -g yourgoal
 A clean build takes about fifteen seconds. Two things in the POM are
 load-bearing and easy to break by "tidying":
 
-- **`project.build.sourceEncoding` is `ISO-8859-1`, not UTF-8.** The sources
-  carry Italian comments with accented characters. Compiling them as UTF-8
-  fails with ~68 "unmappable character" errors. Converting the tree to UTF-8 is
-  a reasonable change, but it has to be one deliberate commit, not a side
-  effect. Thirteen files are non-ASCII and they are **not consistent** — some
-  Latin-1, some already UTF-8, all read as Latin-1 by `javac`. Only comments
-  are affected today. Until that is done, **write non-ASCII in Java string
-  literals as `\u` escapes**: a literal `'caffè'` typed into a test reaches the
-  compiler as two characters, and the test fails for a reason that has nothing
-  to do with the code under test. That is not hypothetical — see
-  `EncodingTest`'s javadoc.
+- **The tree is UTF-8** — `project.build.sourceEncoding`, the Java sources, the
+  Prolog resources and the test data all. It used to be ISO-8859-1 and had
+  drifted (nine Latin-1 files, six already UTF-8, all compiled as Latin-1);
+  `CODE_REVIEW.md` §24 has the conversion and its proof, which is that all 260
+  class files came out byte-identical.
+
+  **Whatever edits these files must read and write UTF-8.** Getting it wrong
+  does not merely display the accented comments oddly — it replaces them with
+  U+FFFD and the original letters are gone. Eleven characters were lost that way
+  before this repository's history starts, and 29 more were lost *during* this
+  review before being recovered from `master` by context. If a tool cannot be
+  trusted with it, write non-ASCII as `\u` escapes.
 - **`sourceDirectory` is `src`**, not `src/main/java` — the tree keeps its
   original Eclipse layout. Tests live in `test/java`, test fixtures in
   `test/resources`.
@@ -111,8 +112,9 @@ if you care to keep it accurate.
   programs checked against independently known answers (six queens has four
   solutions, `tak(14,10,4)` is 5). The slowest class in the suite at ~13 s.
 - `IsoConformanceTest` — runs the 465-case suite in `test/resources/iso/`.
-- `EncodingTest` — text is UTF-8 whatever the JVM's default charset is, and the
-  `\xH...H\` and `\O...O\` escapes denote code points. `CODE_REVIEW.md` §23.
+- `EncodingTest` — text is UTF-8 whatever the JVM's default charset is, the
+  `\xH...H\` and `\O...O\` escapes denote code points, and a character code may
+  be any code point. `CODE_REVIEW.md` §23 and §24.
 
 Tests run against the **release** kernel (no `JIPDebugger.debug`), so the suite
 also proves the bootstrap produced a loadable kernel. Surefire uses
@@ -368,10 +370,14 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
   differs between Java 17 and 18 and with the machine's locale, so the same file
   gave different answers on different JVMs. `setEncoding` is still public for
   Latin-1 sources. `CODE_REVIEW.md` §23.
-- **Characters outside the BMP are still wrong**: stored as UTF-16 surrogate
-  pairs and counted as two, so `atom_length('\x1F600\', N)` gives 2. Everything
-  in the BMP is right. Fixing it means auditing every place that counts or
-  indexes characters.
+- **A character code is a code point**, not a byte: `atom_codes(A, [8364])`
+  builds `€`. The range check was `0..255`, so the engine could hold a character
+  it could not construct. `CODE_REVIEW.md` §24.
+- **Characters outside the BMP are still counted as two**: `atom_length` and
+  friends count Java `char`s, so `atom_length('\x1F600\', N)` gives 2.
+  Constructing one from its code works now; counting and indexing it does not.
+  Everything in the BMP is right. Fixing the rest means auditing every place
+  that counts or indexes characters.
 - Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
   past it with `evaluation_error(int_overflow)`. That is the limit of the
   `double` the value is held in, so it is a real boundary, not an arbitrary

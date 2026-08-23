@@ -126,7 +126,7 @@ public class JIPQuery extends Object implements Serializable
         if(m_bNoMore)
             return false;
         else if(m_wam.isNeverRun())
-            return true;  // qui è tutto pronto per partire
+            return true;  // qui Ã¨ tutto pronto per partire
         else if (m_wam.isClosed())
             return false;
 

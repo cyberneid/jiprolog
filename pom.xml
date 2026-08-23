@@ -45,13 +45,19 @@
 
   <properties>
     <!--
-      The sources are ISO-8859-1, not UTF-8: they carry Italian comments with
-      accented characters written long before UTF-8 was the default. Compiling
-      without this fails with ~68 "unmappable character" errors on any modern
-      JDK. Converting the tree to UTF-8 is worth doing, but it is a separate
-      change - until then this property is load-bearing.
+      The tree is UTF-8. It used to be ISO-8859-1 - Italian comments with
+      accented characters, written long before UTF-8 was the default - and had
+      drifted: nine files were still Latin-1, four had already been re-saved as
+      UTF-8, and every one of them was compiled as Latin-1 regardless. Only
+      comments were affected, so nothing misbehaved, but it made a test fail
+      once for a reason that had nothing to do with the code under test.
+
+      Keep it UTF-8. Anything that writes these files - an editor, a script -
+      must read and write UTF-8, or the accented comments turn into U+FFFD and
+      the original letters are gone. That has happened to this tree before; see
+      CODE_REVIEW.md section 24.
     -->
-    <project.build.sourceEncoding>ISO-8859-1</project.build.sourceEncoding>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
     <!--

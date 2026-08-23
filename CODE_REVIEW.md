@@ -48,9 +48,9 @@ a working jar, and runs its tests on four JDK/OS combinations. The independent
 INRIA suite runs too (§21): 420 cases, six real deviations, and a score the
 review work had not moved. One of the six is now fixed (§22) and it is down to
 five. §1, §2, §4, §5,
-§9, §10, §15, §16, §17, §19, §20, §22, §23 and the two resolved bullets of §12
-are fixed; §3 all but the built-in table. 107 tests and a 465-case conformance
-suite, none
+§9, §10, §15, §16, §17, §19, §20, §22, §23, §24 and the two resolved bullets of
+§12 are fixed; §3 all but the built-in table. 112 tests and a 465-case
+conformance suite, none
 disabled. What remains is §11 (error handling and resource management), §13
 (maintainability) and §18, plus the deeper items §10 lists as still open.
 
@@ -1411,7 +1411,10 @@ showing for an engine of this size, and the six are narrow.
 flagged**; the rest stand.
 
 The more useful conclusion is about method. Run this before believing any
-conformance claim made from `test/resources/iso` alone.
+conformance claim made from `test/resources/iso` alone — and read what a failure
+is actually asserting before treating it as a defect. Three of the twelve here
+encode assumptions from 1999 that ISO permits but does not require, and §24
+turned two more into failures by making the engine's character set Unicode.
 
 ---
 
@@ -1573,6 +1576,90 @@ is not this one.
   `US-ASCII` alike — which is the property that was missing.
 - 107 tests and 465 conformance cases green on `mvn clean verify`. All the
   Prolog resources are ASCII, so the bootstrap is unaffected.
+
+---
+
+## 24. The source tree is UTF-8, and a character code is a code point
+
+The second half of §23, and the deliberate commit CLAUDE.md had been deferring
+since the first review.
+
+### The tree
+
+Fifteen files carried non-ASCII characters, and they had drifted apart: nine
+were still Latin-1, six had been re-saved as UTF-8 at some point, and `javac`
+read all of them as Latin-1 because `project.build.sourceEncoding` said so.
+
+**Every non-ASCII character in the tree is inside a comment** — checked, not
+assumed — which makes the conversion verifiable exactly: the compiled classes
+must not move. They did not. All **260 class files are byte-identical** before
+and after, built from the same sources with the two encodings.
+
+Four files were already damaged before this work: `Clause`, `GlobalDB` and
+`JIPEngine` carry eleven U+FFFD replacement characters that are present in
+`master` as shipped — some tool read them as UTF-8 and saved the result, and the
+original letters are gone. They are left as they are; guessing at eleven Italian
+words would be inventing history.
+
+**`PrologParser.java` was damaged by this branch.** `master` has 29 intact
+Latin-1 accented characters in its comments and no U+FFFD; the branch had the
+exact opposite. Recovered by matching each occurrence's surrounding context
+against `master` — 27 resolved uniquely, the last two by hand, both `è` in
+`// last obj è infisso e c'è un antecedente`. Zero U+FFFD remain in that file.
+
+This is what the POM comment is now about: whatever writes these files has to
+read and write UTF-8, because getting it wrong destroys the characters rather
+than merely displaying them oddly.
+
+### A character code was capped at a byte
+
+Found by a test written for §23's output path, which could not even set up its
+own fixture:
+
+```prolog
+?- atom_codes(A, [8364]).        representation_error(character_code)
+?- atom_chars(A, ['€']),
+   atom_codes(A, L).             L = [8364].
+```
+
+The engine could hold a character it could not construct. `PString` checked
+`nAscii < 0 || nAscii > 255` — a byte — while everything upstream had just been
+taught to read UTF-8. The check is `Character.isValidCodePoint` now, and the
+character is appended with `Character.toChars` rather than a `(char)` cast, so
+the whole BMP works and a single astral character is accepted where it is
+written as one. Out-of-range codes are still refused: `-1` and `1114112` both
+raise `representation_error(character_code)`.
+
+### What this cost in the INRIA suite, honestly
+
+**10 flagged goals to 11.** `char_code` is fixed and gone; `atom_codes` and
+`number_codes` now fail, on these:
+
+```prolog
+[atom_codes(A,[105,115,1000]), representation_error(character_code)].  % 1000 not a code
+[number_codes(A,[0'1,0'2,1000]), representation_error(character_code)]. % 1000 not a code
+```
+
+The suite's own comment states the assumption: in 1999 a character code was a
+byte. ISO 13211-1 raises `representation_error(character_code)` when the code is
+not in *the processor's character set*, and this processor's character set is
+now Unicode, in which 1000 is Ϩ. `atom_codes(A, [105,115,1000])` giving `isϨ`
+is the right answer for the engine this now is — the same kind of era assumption
+as the `max_arity`-is-an-integer cases in §21, and the count goes up rather than
+down because of it.
+
+### Measured
+
+- 260 class files byte-identical across the encoding change.
+- `EncodingTest` grows to 13 tests: the engine's charset, source text, file
+  streams, escapes, the code-point range, and a write-then-read round trip
+  through both text capture and a file.
+- 112 tests and 465 conformance cases green. The INRIA suite is at 11, for the
+  reason above.
+- `PrologTestBase` decoded captured engine output as ISO-8859-1 while the engine
+  wrote UTF-8. Nothing was asserting on non-ASCII output, so nothing failed —
+  which is the point: it would have been a silent mismatch the day something
+  did.
 
 ---
 
