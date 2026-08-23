@@ -48,8 +48,9 @@ a working jar, and runs its tests on four JDK/OS combinations. The independent
 INRIA suite runs too (§21): 420 cases, six real deviations, and a score the
 review work had not moved. One of the six is now fixed (§22) and it is down to
 five. §1, §2, §4, §5,
-§9, §10, §15, §16, §17, §19, §20, §22 and the two resolved bullets of §12 are
-fixed; §3 all but the built-in table. 99 tests and a 465-case conformance suite, none
+§9, §10, §15, §16, §17, §19, §20, §22, §23 and the two resolved bullets of §12
+are fixed; §3 all but the built-in table. 107 tests and a 465-case conformance
+suite, none
 disabled. What remains is §11 (error handling and resource management), §13
 (maintainability) and §18, plus the deeper items §10 lists as still open.
 
@@ -1323,8 +1324,8 @@ AGPL. `tools/run-inriasuite.sh` fetches it into `target/` on demand. It is not
 part of `mvn verify` — it needs the network, it is not green, and a build should
 not depend on a 1999 tarball staying reachable.
 
-**420 cases, 12 flagged.** Of those, six are real and six are the suite or the
-environment.
+**420 cases, 12 flagged.** Of those, seven are real and five are the suite or
+the environment — the split having been corrected once, see `char_code` below.
 
 ### The result that matters
 
@@ -1390,8 +1391,12 @@ It needs checking against the corrigenda before anyone changes code for it.
   `sub_atom(charity, A, 3, B, C)`, reports `Solutions Missing: []` — nothing is
   missing, the expectation simply lists fewer bindings than the engine reports.
   The driver's own header admits "matching of solutions is not yet perfected".
-- **`char_code(A, 163)`** is a text-encoding artifact of a Latin-1 file from
-  1999; the answer is correct.
+- ~~**`char_code(A, 163)`** is a text-encoding artifact of a Latin-1 file from
+  1999; the answer is correct.~~ **Wrong — this one was real, see §23.** The
+  suite file is pure ASCII and writes the character as `'\xa3\'`; the engine
+  read that escape as 65443 rather than 163. Classified from the mangled
+  terminal output instead of from the file's bytes, which is exactly the
+  mistake §21 is about.
 - **`catch-and-throw`** expects an uncaught ball to surface as `system_error`.
   This engine propagates the ball. Driver-dependent rather than clearly wrong.
 - **`current_prolog_flag(debug, off)`**, twice, appears only in `-debug` runs —
@@ -1479,6 +1484,95 @@ made it harder to fix; the reader is where it belongs, and it is not fixed here.
 - A latent truncation went with it: the canonical text came from
   `Integer.toString((int) value)`, so `number_chars(3000000000, L)` gave a
   negative number's digits. It is `long` now, per §9's rule.
+
+---
+
+## 23. ~~High — text handling follows the JVM's default charset, not a policy~~
+
+**Fixed.** Two defects, found by pulling on §21's `char_code` thread after
+misclassifying it.
+
+### The engine had no encoding policy
+
+`JIPEngine`'s constructor said
+
+```java
+setEncoding(Charset.defaultCharset().name());
+```
+
+so "the encoding" was whatever the JVM happened to default to — the platform
+locale before Java 18, UTF-8 from Java 18 on. And the read side did not even use
+that: every `new InputStreamReader(ins)` and `new FileReader(path)` took the
+platform default directly. The same source file gave three different answers:
+
+| `file.encoding` | `caffè` | `€` |
+|---|---|---|
+| UTF-8 | `[99,97,102,102,232]` | `[8364]` |
+| ISO-8859-1 | `[99,97,102,102,195,168]` | `[226,130,172]` |
+| US-ASCII | `[99,97,102,102,65533,65533]` | `[65533,65533,65533]` |
+
+The last row is data destruction, and this project's CI runs JDK 8, 11, 17 and
+21 — four JVMs, two different default-charset rules between them.
+
+Now `setEncoding("UTF-8")` is the default and every reader takes the engine's
+charset: `consultFile`, `consultStream`, `compile/2`, `pack`, the kernel loader,
+`see/1` and `open/3`, and the JDBC/text clause databases — whose *writers* used
+the platform default too, so a file written by one machine did not read back on
+another. `setEncoding` stays public for anyone who has Latin-1 sources.
+
+`StreamManager` needed a different fix. Reading a `.pl` out of a jar, it decoded
+bytes to characters through a `Reader` and then wrote each character into a
+`ByteArrayOutputStream` — which truncates to a byte. Anything above 127 inside a
+jar was corrupted regardless of charset. It copies bytes now and leaves the
+decoding to whoever reads the stream.
+
+### Numeric escapes denoted a byte, not a character
+
+Independent of any charset, and the actual `char_code` finding:
+
+```prolog
+?- char_code('\xa3\', C).     C = 65443.     % should be 163
+?- char_code('\xe9\', C).     C = 65513.     % should be 233
+?- char_code('\x41\', C).     C = 65.        % correct, by luck
+?- char_code('\x20ac\', C).   syntax error   % should be 8364
+```
+
+Two causes in the same handful of lines. The value went through
+`(char)(byte)0xA3`, and a `byte` is signed, so 0xA3 sign-extends to 0xFFA3 —
+invisible below 0x80, which is why `\x41\` looked fine. And the hex form read
+*exactly two* digits where ISO 6.4.2.1 allows one or more terminated by `\`, so
+`\x20ac\` stopped after `20`, left `ac` in the text, and failed later with an
+error about a carriage return. The octal form had the sign-extension half of the
+same bug. Both now read digits until the closing `\` into an `int` and append a
+code point.
+
+### What is still not right
+
+Characters outside the BMP are stored as UTF-16 surrogate pairs and counted as
+two: `atom_length('\x1F600\', N)` gives `N = 2` and `atom_codes` gives
+`[55357, 56832]` rather than `[128512]`. Fixing that means auditing every place
+that indexes or counts characters — `atom_length`, `sub_atom`, `atom_codes`,
+`char_code`, the tokenizer — and is its own piece of work. Everything in the BMP,
+which is all normal text including accents, Greek, Cyrillic and CJK, is correct.
+
+**The Java sources are still mixed and still compiled as ISO-8859-1.** Thirteen
+files are non-ASCII: some Latin-1, some already UTF-8, all read as Latin-1 by
+`javac`. Only comments are affected today, so nothing misbehaves — but it caught
+`EncodingTest` on its first run, where a literal `'caffè'` reached the compiler
+as two Latin-1 characters and failed a test about the engine for a reason that
+had nothing to do with the engine. The test now uses `\u` escapes. Converting
+the tree is the deliberate commit CLAUDE.md has always said it should be, and it
+is not this one.
+
+### Measured
+
+- `EncodingTest`, 8 tests. **All eight fail against the previous commit** when
+  the JVM default is not UTF-8; three of them fail even when it is, those being
+  the escapes.
+- The suite passes with `-Dfile.encoding` set to `UTF-8`, `ISO-8859-1` and
+  `US-ASCII` alike — which is the property that was missing.
+- 107 tests and 465 conformance cases green on `mvn clean verify`. All the
+  Prolog resources are ASCII, so the bootstrap is unaffected.
 
 ---
 

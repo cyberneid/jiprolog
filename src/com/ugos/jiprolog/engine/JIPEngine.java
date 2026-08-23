@@ -166,9 +166,14 @@ public class JIPEngine implements Serializable
         // default streams
         setUserOutputStream(System.out);
 
-        setUserInputStream(new InputStreamReader(System.in));
+        // UTF-8 e non Charset.defaultCharset(): il default della JVM
+        // dipende dalla versione e dal locale della macchina - UTF-8 da'
+        // Java 18, prima quello della piattaforma - e faceva si' che lo
+        // stesso file .pl desse tre risultati diversi. setEncoding resta
+        // pubblico per chi deve leggere sorgenti in un'altra codifica.
+        setEncoding("UTF-8");
 
-        setEncoding(Charset.defaultCharset().name());
+        setUserInputStream(new InputStreamReader(System.in, java.nio.charset.Charset.forName(getEncoding())));
 
         setEnvVariable("char_conversion", "off");
         setEnvVariable("double_quotes", "codes");
@@ -327,7 +332,7 @@ public class JIPEngine implements Serializable
 //                    System.out.println("strBasePath " + strBasePath);  //DBG
                     strCurSarchPath = getSearchPath();
                     setSearchPath(strBasePath);
-                    Consult1.consult(new InputStreamReader(ins), strPath, this, 0, getEnvVariable("enable_clause_check").equals("true"));
+                    Consult1.consult(new InputStreamReader(ins, java.nio.charset.Charset.forName(getEncoding())), strPath, this, 0, getEnvVariable("enable_clause_check").equals("true"));
                     setSearchPath(strCurSarchPath);
                 }
                 catch(RuntimeException ex)

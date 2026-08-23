@@ -224,13 +224,18 @@ public class StreamManager
                     throw new FileNotFoundException(strPath);
                 }
 
-                Reader ins = new InputStreamReader(zipFile.getInputStream(entry));
-                // legge il file
+                // Copia di byte, senza decodificare. Prima passava per un
+                // InputStreamReader e poi scriveva ogni carattere letto in un
+                // ByteArrayOutputStream, che lo tronca a un byte: un file dentro
+                // un jar con caratteri sopra 127 arrivava corrotto. Chi legge
+                // questo stream lo decodifica con la codifica del motore.
+                InputStream ins = zipFile.getInputStream(entry);
                 outs = new ByteArrayOutputStream();
-                int c;
-                while((c = ins.read()) != -1)
+                final byte[] buffer = new byte[8192];
+                int nRead;
+                while((nRead = ins.read(buffer)) != -1)
                 {
-                    outs.write(c);
+                    outs.write(buffer, 0, nRead);
                 }
                 // chiude il file zip
                 zipFile.close();

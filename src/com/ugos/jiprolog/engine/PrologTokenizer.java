@@ -38,6 +38,7 @@ class PrologTokenizer
     static final String SIGN_CHARS      = "-+";
     static final String NUMBER_BINARY_CHARS      = "01";
     static final String NUMBER_OCTAL_CHARS       = "01234567";
+    static final String HEX_CHARS                = "0123456789abcdefABCDEF";
     static final String NUMBER_HEXADECIMAL_CHARS = "0123456789abcdefABCDEF";
 
     static final char   LINECOMMENT_CHAR = '%';
@@ -484,28 +485,9 @@ class PrologTokenizer
                                     sbTerm.append( Integer.toString(11));
                                     break;
 
-                                case 'x':  // \xHX
-                                    // legge il prossimo byte
-                                    int d1 = m_lnReader.read();
-                                    // legge il prossimo byte
-                                    int d2 = m_lnReader.read();
-                                    String strHexNum = (char)d1 + "" + (char)d2;
-
-                                    try
-                                    {
-                                        byte[] val = ValueEncoder.hexStringToBytes(strHexNum);
-                                        sbTerm.append( Integer.toString(val[0]));
-                                    }
-                                    catch(NumberFormatException ex)
-                                    {
-                                        throw syntaxError("bad_escape_sequence('\\x" + strHexNum + "')");
-                                    }
-
-                                    // legge il prossimo byte
-                                    d2 = m_lnReader.read();
-                                    if(d2 != '\\')  // ISO def
-                                        m_lnReader.unread((char)d2);
-//                                        m_lnReader.pushback();
+                                case 'x':  // \xH...H\
+                                    sbTerm.append(Integer.toString(
+                                            readEscapedCodePoint(16, HEX_CHARS, m_lnReader.read())));
                                     break;
 
                                 default: // ignora \
@@ -688,31 +670,12 @@ class PrologTokenizer
                             }
                             else if(NUMBER_CHARS.indexOf(c) > -1)
                             {
-                                String strNum = "" + (char)c;
-                                // legge i prossimi numeri
-                                int d1 = m_lnReader.read();
-                                while(NUMBER_CHARS.indexOf(d1) > -1)
-                                {
-                                    strNum += "" + (char)d1;
-                                    d1 = m_lnReader.read();
-                                }
-
-                                // legge il prossimo byte
-                                if(d1 != '\\')  // ISO def
-                                    m_lnReader.unread((char)d1);
-//                                    m_lnReader.pushback();
-
-                                try
-                                {
-                                    BigInteger bival = new BigInteger(strNum, 8);
-
-                                    byte val = bival.byteValue();// Byte.parseByte(strNum);
-                                    sbTerm.append((char)val);
-                                }
-                                catch(NumberFormatException ex)
-                                {
-                                    throw syntaxError("bad_escape_sequence('\\x" + strNum + "')");
-                                }
+                                // Le cifre si raccolgono con NUMBER_CHARS e non con
+                                // NUMBER_OCTAL_CHARS di proposito: cosi' \189\ arriva
+                                // intero alla conversione e da' un errore, invece di
+                                // fermarsi a 1 e lasciare "89" nel testo.
+                                sbTerm.appendCodePoint(
+                                        readEscapedCodePoint(8, NUMBER_CHARS, c));
 
                             }
                             else// if(c >= 'a')
@@ -763,29 +726,11 @@ class PrologTokenizer
                                         sbTerm.append( (char)(11));
                                         break;
 
-                                    case 'x':  // \xHX
-                                        // legge il prossimo byte
-                                        int d1 = m_lnReader.read();
-                                        // legge il prossimo byte
-                                        int d2 = m_lnReader.read();
-                                        String strHexNum = (char)d1 + "" + (char)d2;
-
-                                        try
-                                        {
-                                            byte[] val = ValueEncoder.hexStringToBytes(strHexNum);
-                                            sbTerm.append( (char)(val[0]));
-                                        }
-                                        catch(NumberFormatException ex)
-                                        {
-                                            throw syntaxError("bad_escape_sequence('\\x" + strHexNum + "')");
-                                        }
-
-                                        // legge il prossimo byte
-                                        d2 = m_lnReader.read();
-                                        if(d2 != '\\')  // ISO def
-                                            m_lnReader.unread((char)d2);
-//                                            m_lnReader.pushback();
+                                    case 'x':  // \xH...H\
+                                        sbTerm.appendCodePoint(
+                                                readEscapedCodePoint(16, HEX_CHARS, m_lnReader.read()));
                                         break;
+
 
                                     case '\r':
                                     case '\n':
@@ -940,6 +885,53 @@ class PrologTokenizer
     {
         String m_strToken;
         int m_nType;
+    }
+
+    // ISO 6.4.2.1: una sequenza di escape numerica e' \xH...H\ oppure
+    // \O...O\ - una o piu' cifre, chiuse da una barra rovescia - e denota un
+    // punto di codice, non un byte.
+    //
+    // Erano lette in un byte: \xa3\ passava per (char)(byte)0xA3, che con
+    // l'estensione di segno diventa 0xFFA3, cioe' 65443 invece di 163. Sotto
+    // 0x80 non si vedeva. E l'esadecimale ne leggeva esattamente due, quindi
+    // \x20ac\ si fermava a 20 e il resto finiva nel testo, facendo poi
+    // fallire la chiusura dell'atomo con un errore che parlava di ritorno a
+    // capo.
+    private final int readEscapedCodePoint(final int nRadix, final String strDigits, final int nFirst)
+            throws IOException, JIPSyntaxErrorException
+    {
+        final StringBuilder sbDigits = new StringBuilder();
+
+        int c = nFirst;
+        while(c > -1 && strDigits.indexOf(c) > -1)
+        {
+            sbDigits.append((char)c);
+            c = m_lnReader.read();
+        }
+
+        // la barra di chiusura fa parte della sequenza; se manca, il carattere
+        // lo ha letto qualcun altro e va restituito
+        if(c != '\\' && c > -1)
+            m_lnReader.unread((char)c);
+
+        if(sbDigits.length() == 0)
+            throw syntaxError("bad_escape_sequence('\\" + (nRadix == 16 ? "x" : "") + "')");
+
+        final int nCodePoint;
+
+        try
+        {
+            nCodePoint = Integer.parseInt(sbDigits.toString(), nRadix);
+        }
+        catch(NumberFormatException ex)
+        {
+            throw syntaxError("bad_escape_sequence('\\" + sbDigits + "')");
+        }
+
+        if(!Character.isValidCodePoint(nCodePoint))
+            throw syntaxError("bad_escape_sequence('\\" + sbDigits + "')");
+
+        return nCodePoint;
     }
 
     JIPSyntaxErrorException syntaxError(String strMsg)

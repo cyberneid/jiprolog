@@ -30,7 +30,13 @@ load-bearing and easy to break by "tidying":
   carry Italian comments with accented characters. Compiling them as UTF-8
   fails with ~68 "unmappable character" errors. Converting the tree to UTF-8 is
   a reasonable change, but it has to be one deliberate commit, not a side
-  effect.
+  effect. Thirteen files are non-ASCII and they are **not consistent** — some
+  Latin-1, some already UTF-8, all read as Latin-1 by `javac`. Only comments
+  are affected today. Until that is done, **write non-ASCII in Java string
+  literals as `\u` escapes**: a literal `'caffè'` typed into a test reaches the
+  compiler as two characters, and the test fails for a reason that has nothing
+  to do with the code under test. That is not hypothetical — see
+  `EncodingTest`'s javadoc.
 - **`sourceDirectory` is `src`**, not `src/main/java` — the tree keeps its
   original Eclipse layout. Tests live in `test/java`, test fixtures in
   `test/resources`.
@@ -105,6 +111,8 @@ if you care to keep it accurate.
   programs checked against independently known answers (six queens has four
   solutions, `tak(14,10,4)` is 5). The slowest class in the suite at ~13 s.
 - `IsoConformanceTest` — runs the 465-case suite in `test/resources/iso/`.
+- `EncodingTest` — text is UTF-8 whatever the JVM's default charset is, and the
+  `\xH...H\` and `\O...O\` escapes denote code points. `CODE_REVIEW.md` §23.
 
 Tests run against the **release** kernel (no `JIPDebugger.debug`), so the suite
 also proves the bootstrap produced a loadable kernel. Surefire uses
@@ -353,6 +361,17 @@ JVM are not fully isolated, and concurrent use across threads is not safe.** See
   `atom_number('1e5', N)` now fails — while **the reader still accepts `1e5`**,
   as integer 100000. That divergence is deliberate and the reader is where it
   should be fixed.
+- **Text is UTF-8, by policy and not by accident.** `JIPEngine` sets the encoding
+  to UTF-8 in its constructor and every reader — `consultFile`, `consultStream`,
+  `compile/2`, the kernel loader, `see/1`, `open/3`, the clause databases — takes
+  it from `getEncoding()`. It used to be `Charset.defaultCharset()`, which
+  differs between Java 17 and 18 and with the machine's locale, so the same file
+  gave different answers on different JVMs. `setEncoding` is still public for
+  Latin-1 sources. `CODE_REVIEW.md` §23.
+- **Characters outside the BMP are still wrong**: stored as UTF-16 surrogate
+  pairs and counted as two, so `atom_length('\x1F600\', N)` gives 2. Everything
+  in the BMP is right. Fixing it means auditing every place that counts or
+  indexes characters.
 - Integers are exact to ±(2^53−1) — `Expression.MAX_INTEGER` — and overflow
   past it with `evaluation_error(int_overflow)`. That is the limit of the
   `double` the value is held in, so it is a real boundary, not an arbitrary

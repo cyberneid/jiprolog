@@ -787,7 +787,10 @@ final class GlobalDB extends Object// implements Cloneable //Serializable
 
         		InputStream ins = gdb.getClass().getResourceAsStream(KERNEL_DEBUG);
 
-	            PrologParser parser = new PrologParser(new ParserReader(new PushbackLineNumberInputStream(new InputStreamReader(ins))), new OperatorManager(), gdb.jipEngine, "jipkernel.txt");
+	            // UTF-8 e non la codifica del motore: il kernel si carica mentre
+	            // il motore si sta ancora costruendo, quindi getEncoding() non e'
+	            // ancora impostata. jipkernel.txt e' comunque ASCII.
+	            PrologParser parser = new PrologParser(new ParserReader(new PushbackLineNumberInputStream(new InputStreamReader(ins, java.nio.charset.StandardCharsets.UTF_8))), new OperatorManager(), gdb.jipEngine, "jipkernel.txt");
 
 	            PrologObject term;
 	            while ((term = parser.parseNext()) != null)

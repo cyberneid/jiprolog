@@ -62,7 +62,10 @@ public class TextAtomClausesDatabase extends JIPClausesDatabase
     {
         try
         {
-            m_writer = new PrintWriter(new FileWriter(m_strFileName, true));
+            // FileWriter usa il charset di default della JVM mentre la lettura
+            // segue quella del motore: senza questo il file scritto qui non si
+            // rilegge uguale su una macchina con un default diverso.
+            m_writer = new PrintWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(m_strFileName, true), java.nio.charset.Charset.forName(getJIPEngine().getEncoding())));
         }
         catch(IOException ex)
         {

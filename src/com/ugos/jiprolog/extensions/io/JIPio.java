@@ -143,7 +143,7 @@ public final class JIPio
             try
             {
                 URL url = new URL(strPath);
-                reader = new InputStreamReader(url.openStream());
+                reader = new InputStreamReader(url.openStream(), java.nio.charset.Charset.forName(engine.getEncoding()));
             }
             catch(IOException ex)
             {
@@ -157,7 +157,10 @@ public final class JIPio
                     strPath = ffile.getAbsolutePath();
                 }
                 // try as normal path
-                reader = new FileReader(strPath);
+                // FileReader usa il charset di default della JVM, che cambia con
+                // la versione e col locale della macchina. I flussi aperti da
+                // see/1 e open/3 seguono la codifica del motore, come il consult.
+                reader = new InputStreamReader(new FileInputStream(strPath), java.nio.charset.Charset.forName(engine.getEncoding()));
             }
 
 	        reader = new PushbackLineNumberInputStream(reader);

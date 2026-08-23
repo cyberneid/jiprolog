@@ -50,7 +50,7 @@ public class TextAtomClausesEnumeration extends JIPClausesEnumeration
              
         	InputStream ins = StreamManager.getStreamManager().getInputStream(db.getFileName(), getDatabase().getJIPEngine().getSearchPath(), strFileName, strCurDir);
 
-            m_reader = new LineNumberReader(new InputStreamReader(ins));
+            m_reader = new LineNumberReader(new InputStreamReader(ins, java.nio.charset.Charset.forName(db.getJIPEngine().getEncoding())));
         }
         catch(IOException ex)
         {

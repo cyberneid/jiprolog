@@ -38,7 +38,7 @@ public class PrologClausesEnumeration extends JIPClausesEnumeration
         
         try
         {
-            m_reader = new LineNumberReader(new FileReader(db.getFileName()));
+            m_reader = new LineNumberReader(new InputStreamReader(new java.io.FileInputStream(db.getFileName()), java.nio.charset.Charset.forName(db.getJIPEngine().getEncoding())));
         }
         catch(IOException ex)
         {

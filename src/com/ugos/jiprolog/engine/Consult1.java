@@ -156,7 +156,7 @@ class Consult1 extends BuiltIn
     }
     static final Vector<PrologObject> consult(InputStream ins, String strStreamName, JIPEngine engine, int nQueryHandle, boolean enableClauseChecks)
     {
-    	return consult(new InputStreamReader(ins), strStreamName, engine, nQueryHandle, enableClauseChecks);
+    	return consult(new InputStreamReader(ins, java.nio.charset.Charset.forName(engine.getEncoding())), strStreamName, engine, nQueryHandle, enableClauseChecks);
     }
     
     static final Vector<PrologObject> consult(Reader ins, String strStreamName, JIPEngine engine, int nQueryHandle, boolean enableClauseChecks)
